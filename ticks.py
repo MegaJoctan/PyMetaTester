@@ -82,7 +82,7 @@ def fetch_historical_ticks(start_datetime: datetime,
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
         
-
+"""
 if __name__ == "__main__":
     
     if not mt5.initialize():
@@ -118,3 +118,4 @@ if __name__ == "__main__":
     )
     
     mt5.shutdown()
+"""

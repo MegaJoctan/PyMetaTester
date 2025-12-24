@@ -3,7 +3,6 @@ from datetime import datetime, timezone, timedelta
 import os
 import utils
 import config
-import pandas as pd
 import polars as pl
 
 def bars_to_polars(bars):
@@ -27,6 +26,7 @@ def fetch_historical_bars(symbol: str,
     Fetch historical bar data for a given symbol and timeframe, forward in time.
     Saves data to a single Parquet file in append mode.
     """
+    
     if not utils.ensure_symbol(symbol=symbol):
         print(f"Symbol {symbol} not available")
         return
@@ -86,7 +86,7 @@ def fetch_historical_bars(symbol: str,
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
 
-
+"""
 if __name__ == "__main__":
     
     if not mt5.initialize():
@@ -98,7 +98,7 @@ if __name__ == "__main__":
     end_date = datetime(2025, 1, 10, tzinfo=timezone.utc)
     
     fetch_historical_bars("XAUUSD", mt5.TIMEFRAME_M1, start_date, end_date)
-    fetch_historical_bars("EURUSD", mt5.TIMEFRAME_M5, start_date, end_date)
+    fetch_historical_bars("EURUSD", mt5.TIMEFRAME_H1, start_date, end_date)
     fetch_historical_bars("GBPUSD", mt5.TIMEFRAME_M5, start_date, end_date)
     
     # read polaris dataframe and print the head for both symbols
@@ -129,3 +129,4 @@ if __name__ == "__main__":
 
     
     mt5.shutdown()
+"""
