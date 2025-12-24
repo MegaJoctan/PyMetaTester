@@ -1,30 +1,18 @@
 import MetaTrader5 as mt5
 import error_description
-from Trade.SymbolInfo import CSymbolInfo
 from datetime import datetime, timezone
 
 class CTrade:
     
-    def __init__(self):
-        
-        self.magic_number = None
-        self.deviation_points = None
-        self.filling_type = None
-        
-    def set_magicnumber(self, magic_number: int):
+    def __init__(self, magic_number: int, filling_type_symbol: str, deviation_points: int):
         
         self.magic_number = magic_number
-        
-    def set_deviation_in_points(self, deviation_points: int):
-        
         self.deviation_points = deviation_points
-    
-    def set_filling_type_by_symbol(self, symbol: int):
-        
-        self.filling_type = self._get_type_filling(symbol)
+        self.filling_type = self._get_type_filling(filling_type_symbol)
         
         if self.filling_type == -1:
-            print(f"Failed to set filling type for '{symbol}'")
+            print("Failed to initialize the class, Invalid filling type. Check your symbol")
+            return
         
     def _get_type_filling(self, symbol):
         
@@ -71,14 +59,17 @@ class CTrade:
             "volume": volume,
             "type": order_type,
             "price": price,
-            "sl": sl,
-            "tp": tp,
             "deviation": self.deviation_points,
             "magic": self.magic_number,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling":  self.filling_type,
         }
+        
+        if sl > 0.0:
+            request["sl"] = sl
+        if tp > 0.0:
+            request["tp"] = tp
         
         # send a trading request
         result = mt5.order_send(request)

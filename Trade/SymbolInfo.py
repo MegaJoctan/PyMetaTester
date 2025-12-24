@@ -26,28 +26,17 @@ class CSymbolInfo:
     def name(self, symbol_name: str):
         
         self.symbol = symbol_name
+        self.refresh()
     
     # --- controlling
     
-    def symbol_info_check(method):
-        def wrapper(self, *args, **kwargs):
-            if not self.info: # if symbolinfo == none 
-                if not self.refresh(): # forces to get symbolinfo
-                    raise Exception(f"Failed to get symbol info for {self.symbol}. MetaTrader5 Error = {self.mt5_instance.last_error()}")
-            return method(self, *args, **kwargs)
-        return wrapper
-    
-    def refresh(self) -> bool:
-        
+    def refresh(self):
         info = self.mt5_instance.symbol_info(self.symbol)
-        
         if not info:
-            return False
-        
+            raise Exception(f"Failed to get symbol info for {self.symbol}. MetaTrader5 Error = {self.mt5_instance.last_error()}")
         self.info = info
         return True
 
-    @symbol_info_check
     def get_info(self):
         
         self.refresh()
@@ -84,105 +73,92 @@ class CSymbolInfo:
 
     # --- properties
     
-    @symbol_info_check
-    def get_name(self):
+    def get_name(self) -> str:
         return self.info.name
     
-    def select(self, select=True):
+    def select(self, select=True) -> bool:
         
         return self.mt5_instance.symbol_select(self.symbol, select)
 
     # --- volumes
     
-    def volume(self):
+    def volume(self) -> int:
         return self.ticks_info['volume']
     
-    def volume_real(self):
+    def volume_real(self) -> int:
         return self.ticks_info['volume_real']
     
-    
-    @symbol_info_check
-    def volume_high(self):
+    def volume_high(self) -> int:
         return self.info.volumehigh
     
-    @symbol_info_check
-    def volume_low(self):
+    def volume_low(self) -> int:
         return self.info.volumelow
     
     # --- Miscillaneous
     
-    def time(self, timezone):
+    def time(self, timezone) -> datetime:
         return datetime.fromtimestamp(self.ticks_info['time'], tz=timezone)
     
-    def time_msc(self):
+    def time_msc(self) -> int:
         return self.ticks_info["time_msc"]
 
-    @symbol_info_check
-    def spread(self):
+    def spread(self) -> float:
         return self.info.spread
 
-    @symbol_info_check
-    def spread_float(self):
+    def spread_float(self) -> float:
         return self.info.spread_float
     
-    @symbol_info_check
     def ticks_book_depth(self):
         return self.info.ticks_bookdepth
     
     # --- Trade levels
     
-    @symbol_info_check
-    def stops_level(self):
+    def stops_level(self) -> int:
         return self.info.trade_stops_level
 
-    @symbol_info_check
-    def freeze_level(self):
+    def freeze_level(self) -> int:
         return self.info.trade_freeze_level
     
     # --- bid parameters
     
-    def bid(self):
+    def bid(self) -> float:
+        """Returns the current bid price."""
         return self.ticks_info['bid']
         
-    def bid_high(self):
+    def bid_high(self) -> float:
         return self.info.bidhigh
 
-    def bid_low(self):
+    def bid_low(self) -> float:
         return self.info.bidlow
     
     # --- ask parameters
     
-    def ask(self):
+    def ask(self) -> float:
+        """Returns the current ask price."""
         return self.ticks_info['ask']
     
-    @symbol_info_check
-    def ask_high(self):
+    def ask_high(self) -> float:
         return self.info.askhigh
 
-    @symbol_info_check
-    def ask_low(self):
+    def ask_low(self) -> float:
         return self.info.asklow
     
     # --- Last parameters
     
-    @symbol_info_check
     def is_synchronized(self):
         return self.info.select
 
-    def last(self):
+    def last(self) -> float:
         return self.ticks_info['last']
 
-    @symbol_info_check
-    def last_high(self):
+    def last_high(self) -> float:
         return self.info.lasthigh
 
-    @symbol_info_check
-    def last_low(self):
+    def last_low(self) -> float:
         return self.info.lastlow
 
     # --- terms and calculation of trades 
     
-    @symbol_info_check
     def trade_calc_mode(self):
         return self.info.trade_calc_mode
     
@@ -205,7 +181,6 @@ class CSymbolInfo:
 
         return calc_mode_map.get(self.trade_calc_mode(), "Unknown trade calculation mode")
     
-    @symbol_info_check
     def trade_mode(self):
         return self.info.trade_mode
 
@@ -222,7 +197,6 @@ class CSymbolInfo:
         return trade_mode_map.get(self.trade_mode(), "Unknown trade mode")
     
     
-    @symbol_info_check
     def trade_execution(self):
         return self.info.trade_exemode
 
@@ -238,13 +212,11 @@ class CSymbolInfo:
 
         return exec_mode_map.get(self.trade_execution(), "Unkown trade execution mode")
         
-    @symbol_info_check
     def order_mode(self):
         return self.info.order_mode
 
     # --- swaps
     
-    @symbol_info_check
     def swap_mode(self):
         return self.info.swap_mode
 
@@ -264,7 +236,6 @@ class CSymbolInfo:
     
         return swap_mode_map.get(self.swap_mode(), "Unkown swap mode")
 
-    @symbol_info_check
     def swap_rollover_3days(self):
         return self.info.swap_rollover3days
 
@@ -282,178 +253,136 @@ class CSymbolInfo:
 
         return swap_rollover_map.get(self.swap_rollover_3days(), "Unkown swap rollover 3 days")
         
-    @symbol_info_check
     def filling_mode(self):
         return self.info.filling_mode
     
     # --- dates for futures
 
-    @symbol_info_check
     def expiration_time(self):
         return self.info.expiration_time
 
-    @symbol_info_check
     def start_time(self):
         return self.info.start_time
     
     # --- margin parameters
     
-    @symbol_info_check
     def margin_initial(self):
         return self.info.margin_initial
 
-    @symbol_info_check
     def margin_maintenance(self):
         return self.info.margin_maintenance
 
-    @symbol_info_check
     def margin_hedged(self):
         return self.info.margin_hedged
 
-    @symbol_info_check
     def margin_hedged_use_leg(self):
         return self.info.margin_hedged_use_leg
     
     # --- tick parameters
 
-    @symbol_info_check
-    def digits(self):
+    def digits(self) -> float:
         return self.info.digits
 
-    @symbol_info_check
-    def point(self):
+    def point(self) -> float:
         return self.info.point
     
-    @symbol_info_check
     def tick_value(self):
         return self.info.trade_tick_value
 
-    @symbol_info_check
     def tick_value_profit(self):
         return self.info.trade_tick_value_profit
 
-    @symbol_info_check
     def tick_value_loss(self):
         return self.info.trade_tick_value_loss
 
-    @symbol_info_check
     def tick_size(self):
         return self.info.trade_tick_size
 
-    @symbol_info_check
     def swap_long(self):
         return self.info.swap_long
 
-    @symbol_info_check
     def swap_short(self):
         return self.info.swap_short
     
     # --- Lots parameters
     
-    @symbol_info_check
     def contract_size(self):
         return self.info.trade_contract_size
     
-    @symbol_info_check
     def lots_min(self):
         return self.info.volume_min
 
-    @symbol_info_check
     def lots_max(self):
         return self.info.volume_max
 
-    @symbol_info_check
     def lots_step(self):
         return self.info.volume_step
 
-    @symbol_info_check
     def lots_limit(self):
         return self.info.volume_limit
 
     # --- Currency 
     
-    @symbol_info_check
     def currency_base(self):
         return self.info.currency_base
 
-    @symbol_info_check
     def currency_profit(self):
         return self.info.currency_profit
 
-    @symbol_info_check
     def currency_margin(self):
         return self.info.currency_margin
 
-    @symbol_info_check
     def bank(self):
         return self.info.bank
     
-    @symbol_info_check
     def description(self):
         return self.info.description    
     
-    @symbol_info_check
     def path(self):
         return self.info.path
     
-    @symbol_info_check
     def page(self):
         return self.info.page
     
     # --- Sessions
 
-    @symbol_info_check
     def session_deals(self):
         return self.info.session_deals
 
-    @symbol_info_check
     def session_buy_orders(self):
         return self.info.session_buy_orders
 
-    @symbol_info_check
     def session_sell_orders(self):
         return self.info.session_sell_orders
 
-    @symbol_info_check
     def session_turnover(self):
         return self.info.session_turnover
 
-    @symbol_info_check
     def session_interest(self):
         return self.info.session_interest
 
-    @symbol_info_check
     def session_buy_orders_volume(self):
         return self.info.session_buy_orders_volume
 
-    @symbol_info_check
     def session_sell_orders_volume(self):
         return self.info.session_sell_orders_volume
 
-    @symbol_info_check
     def session_open(self):
         return self.info.session_open
 
-    @symbol_info_check
     def session_close(self):
         return self.info.session_close
 
-    @symbol_info_check
     def session_aw(self):
         return self.info.session_aw
 
-    @symbol_info_check
     def session_price_settlement(self):
         return self.info.session_price_settlement
 
-    @symbol_info_check
     def session_price_limit_min(self):
         return self.info.session_price_limit_min
 
-    @symbol_info_check
     def session_price_limit_max(self):
         return self.info.session_price_limit_max
     
-    @symbol_info_check
-    def trade_face_value(self):
-        return self.info.trade_face_value
+

@@ -1,16 +1,16 @@
 import MetaTrader5 as mt5
 
 class CTerminalInfo:
-    def __init__(self):
+    def __init__(self, mt5_instance: mt5):
         
         """CTerminalInfo class provides access to the properties of the MetaTrader5 program environment.
         
         """
         
-        self._info = mt5.terminal_info()
+        self._info = mt5_instance.terminal_info()
         
         if self._info is None:
-            raise RuntimeError("Failed to retrieve terminal info: ", mt5.last_error())
+            raise RuntimeError("Failed to retrieve terminal info: ", mt5_instance.last_error())
     
     def is_valid(self):
         return self._info is not None
