@@ -57,32 +57,35 @@ def fetch_historical_bars(symbol: str,
             month_end
         )
 
-        if rates is not None and len(rates) > 0:
+        if rates is None and len(rates)==0:
+            config.simulator_logger.warning(f"Failed to Get bars from MetaTrader5")
+            current = (month_start + timedelta(days=32)).replace(day=1) # Advance to next month safely
+            continue
             
-            df = bars_to_polars(rates)
+        df = bars_to_polars(rates)
 
-            df = df.with_columns([
-                pl.from_epoch("time", time_unit="s").dt.replace_time_zone("utc").alias("time")
-            ])
+        df = df.with_columns([
+            pl.from_epoch("time", time_unit="s").dt.replace_time_zone("utc").alias("time")
+        ])
 
-            df = df.with_columns([
-                pl.col("time").dt.year().alias("year"),
-                pl.col("time").dt.month().alias("month"),
-            ])
-            
-            tf_name = utils.TIMEFRAMES_REV[timeframe]
-            df.write_parquet(
-                os.path.join(config.BARS_HISTORY_DIR, symbol, tf_name),
-                partition_by=["year", "month"],
-                mkdir=True
-            )
+        df = df.with_columns([
+            pl.col("time").dt.year().alias("year"),
+            pl.col("time").dt.month().alias("month"),
+        ])
+        
+        tf_name = utils.TIMEFRAMES_REV[timeframe]
+        df.write_parquet(
+            os.path.join(config.BARS_HISTORY_DIR, symbol, tf_name),
+            partition_by=["year", "month"],
+            mkdir=True
+        )
 
+        if config.is_debug:
             print(df.head(-10))
             
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
 
-        
 
 if __name__ == "__main__":
     
@@ -91,12 +94,12 @@ if __name__ == "__main__":
         mt5.shutdown()
         quit()
     
-    start_date = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    start_date = datetime(2022, 1, 1, tzinfo=timezone.utc)
     end_date = datetime(2025, 1, 10, tzinfo=timezone.utc)
     
-    # fetch_historical_bars("XAUUSD", mt5.TIMEFRAME_M1, start_date, end_date)
-    # fetch_historical_bars("EURUSD", mt5.TIMEFRAME_M5, start_date, end_date)
-    # fetch_historical_bars("GBPUSD", mt5.TIMEFRAME_M5, start_date, end_date)
+    fetch_historical_bars("XAUUSD", mt5.TIMEFRAME_M1, start_date, end_date)
+    fetch_historical_bars("EURUSD", mt5.TIMEFRAME_M5, start_date, end_date)
+    fetch_historical_bars("GBPUSD", mt5.TIMEFRAME_M5, start_date, end_date)
     
     # read polaris dataframe and print the head for both symbols
 
@@ -122,7 +125,7 @@ if __name__ == "__main__":
             pl.col("time").min().alias("time_min"),
             pl.col("time").max().alias("time_max")
         ])
-)
+    )
 
     
     mt5.shutdown()
