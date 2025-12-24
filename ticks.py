@@ -21,6 +21,11 @@ def fetch_historical_ticks(start_datetime: datetime,
                            end_datetime: datetime,
                            symbol: str):
 
+    # first of all we have to ensure the symbol is valid and can be used for requesting data
+    if not utils.ensure_symbol(symbol=symbol):
+        print(f"Symbol {symbol} not available")
+        return
+    
     current = start_datetime.replace(day=1, hour=0, minute=0, second=0)
 
     while True:
@@ -71,7 +76,8 @@ def fetch_historical_ticks(start_datetime: datetime,
             mkdir=True
         )
 
-        print(df.head(-10))
+        if config.is_debug:
+            print(df.head(-10))
         
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
@@ -88,7 +94,8 @@ if __name__ == "__main__":
     start_dt = datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
     end_dt = datetime(2025, 12, 1, 1, 0, tzinfo=timezone.utc)
     
-    fetch_historical_ticks(start_dt, end_dt, symbol)
+    fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol=symbol)
+    fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol= "GBPUSD")
     
     path = os.path.join(config.TICKS_HISTORY_DIR, symbol)
     lf = pl.scan_parquet(path)
