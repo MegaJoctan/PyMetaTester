@@ -1,6 +1,6 @@
 import MetaTrader5 as mt5
 from Trade.SymbolInfo import CSymbolInfo
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pytz
 import sqlite3
 import os
@@ -93,10 +93,11 @@ class Simulator:
 
         self.toolbox_gui = SimToolboxGUI()  # Initialize the GUI
 
-        self.IS_RUNNING = True # is the tester running or stopped
+        self.IS_RUNNING = True # is the simulator running or stopped
         self.IS_TESTER = True # are we on the strategy tester mode or live trading 
         
         self.symbol_info_cache: dict[str, object] = {}
+        self.tick = None
         
     def Start(self, IS_TESTER: bool) -> bool: # simulator start
         
@@ -134,15 +135,23 @@ class Simulator:
 
     def copy_rates_from(self, symbol: str, timeframe: int, date_from: datetime, count: int) -> np.array:
         
+        """Get bars from the MetaTrader 5 terminal starting from the specified date.
+
+        Args:
+            symbol: Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            timeframe: Timeframe the bars are requested for. Set by a value from the TIMEFRAME enumeration. Required unnamed parameter.
+            date_from: Date of opening of the first bar from the requested sample. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Required unnamed parameter.
+
+            count: Number of bars to receive. Required unnamed parameter.
+
+        Returns:
+            Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Return None in case of an error. The info on the error can be obtained using last_error().
+        """
+        
         date_from = utils.ensure_utc(date_from)
         
         if self.IS_TESTER:    
-            """
-            symbol_digits = -1
-            info = self.symbol_info(symbol=symbol)
-            if info is not None:
-                symbol_digits = info.digits
-            """
+            
             # instead of getting data from MetaTrader 5, get data stored in our custom directories
             
             path = os.path.join(config.BARS_HISTORY_DIR, symbol, utils.TIMEFRAMES_REV[timeframe])
@@ -151,9 +160,9 @@ class Simulator:
             try:
                 rates = (
                     lf
-                    .filter(pl.col("time") <= date_from)
-                    .sort("time", descending=True)
-                    .limit(count)
+                    .filter(pl.col("time") <= date_from) # get data starting at the given date
+                    .sort("time", descending=True) 
+                    .limit(count) # limit the request to some bars
                     .select([
                         pl.col("time").dt.epoch("s").cast(pl.Int64).alias("time"),
 
@@ -164,15 +173,14 @@ class Simulator:
                         pl.col("tick_volume"),
                         pl.col("spread"),
                         pl.col("real_volume"),
-                    ])
-                    .collect(engine="auto")
+                    ]) # return only what's required 
+                    .collect(engine="streaming") # the streming engine, doesn't store data in memory
                 ).to_dicts()
 
                 rates = np.array(rates)[::-1] # reverse an array so it becomes oldest -> newest
-                
             
             except Exception as e:
-                config.tester_logger.warn(f"Failed to copy rates {e}")
+                self.__GetLogger().warning(f"Failed to copy rates {e}")
                 return np.array(dict())
         else:
             
@@ -180,12 +188,59 @@ class Simulator:
             rates = np.array(self.__mt5_rates_to_dicts(rates))
             
             if rates is None:
-                config.simulator_logger.warn(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                self.__GetLogger().warning(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                return np.array(dict())
+            
+        return rates
+    
+    def TickUpdate(self, tick: dict):
+        self.tick = tick
+    
+    def __GetLogger(self):
+        if self.IS_TESTER:
+            return config.tester_logger
+        
+        return config.simulator_logger
+    
+    def copy_rates_from_pos(self, symbol: str, timeframe: int, start_pos: int, count: int) -> np.array:
+        
+        """
+        Get bars from the MetaTrader 5 terminal starting from the specified index.
+        
+        Parameters:
+            symbol(str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            timeframe(int): MT5 timeframe the bars are requested for.
+            start_pos(int): Initial index of the bar the data are requested from. The numbering of bars goes from present to past. Thus, the zero bar means the current one. Required unnamed parameter.
+            count(int): Number of bars to receive. Required unnamed parameter.
+
+        Returns:
+            Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Returns None in case of an error. The info on the error can be obtained using last_error().
+        """
+        
+        if self.tick is None or self.tick.time is None:
+            self.__GetLogger().critical("Time information not found in the ticker, call the function 'TickUpdate' giving it the latest tick information")
+            now = datetime.now(tz=timezone.utc)
+        else:
+            now = self.tick.time
+        
+        if self.IS_TESTER:    
+            rates = self.copy_rates_from(symbol=symbol, 
+                                        timeframe=timeframe,
+                                        date_from=now+timedelta(seconds=utils.PeriodSeconds(timeframe)*start_pos),
+                                        count=count)
+        
+        else:
+            
+            rates = self.mt5_instance.copy_rates_from_pos(symbol, timeframe, start_pos, count)
+            rates = np.array(self.__mt5_rates_to_dicts(rates))
+            
+            if rates is None:
+                self.__GetLogger().warning(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
                 return np.array(dict())
             
         return rates
         
-        
+
     def run_toolbox_gui(self):
         
         """
