@@ -5,15 +5,23 @@ import pytz
 import sqlite3
 import os
 import numpy as np
+from types import SimpleNamespace
+import polars as pl
+import utils
+import config
 from toolbox_gui import SimToolboxGUI
 
-class TradeSimulator:
+if config.is_debug:
+    np.set_printoptions(
+        suppress=True,     # disable scientific notation
+    )
+
+class Simulator:
     def __init__(self, simulator_name: str, mt5_instance: mt5, deposit: float, leverage: str="1:100"):
         
         self.mt5_instance = mt5_instance
         self.simulator_name = simulator_name
         
-        self.magic_number = None
         self.deviation_points = None
         self.filling_type = None
         self.id = 0
@@ -85,6 +93,99 @@ class TradeSimulator:
 
         self.toolbox_gui = SimToolboxGUI()  # Initialize the GUI
 
+        self.IS_RUNNING = True # is the tester running or stopped
+        self.IS_TESTER = True # are we on the strategy tester mode or live trading 
+        
+        self.symbol_info_cache: dict[str, object] = {}
+        
+    def Start(self, IS_TESTER: bool) -> bool: # simulator start
+        
+        self.IS_TESTER = IS_TESTER
+    
+    def Stop(self): # simulator stopped
+        self.IS_RUNNING = False
+        pass
+    
+    def symbol_info(self, symbol: str) -> dict:    
+        
+        if symbol not in self.symbol_info_cache:
+            info = self.mt5_instance.symbol_info(symbol)
+            if info is None:
+                return None
+            
+            self.symbol_info_cache[symbol] = info
+        
+        return self.symbol_info_cache[symbol]
+
+    def __mt5_rates_to_dicts(self, rates) -> list[dict]:
+        
+        if rates is None or len(rates) == 0:
+            return []
+
+        # structured numpy array from MT5
+        if rates.dtype.names is not None:
+            return [
+                {name: r[name].item() if hasattr(r[name], "item") else r[name]
+                for name in rates.dtype.names}
+                for r in rates
+            ]
+
+        raise TypeError(f"Unsupported rates format: {type(rates)}, dtype={rates.dtype}")
+
+    def copy_rates_from(self, symbol: str, timeframe: int, date_from: datetime, count: int) -> np.array:
+        
+        date_from = utils.ensure_utc(date_from)
+        
+        if self.IS_TESTER:    
+            """
+            symbol_digits = -1
+            info = self.symbol_info(symbol=symbol)
+            if info is not None:
+                symbol_digits = info.digits
+            """
+            # instead of getting data from MetaTrader 5, get data stored in our custom directories
+            
+            path = os.path.join(config.BARS_HISTORY_DIR, symbol, utils.TIMEFRAMES_REV[timeframe])
+            lf = pl.scan_parquet(path)
+
+            try:
+                rates = (
+                    lf
+                    .filter(pl.col("time") <= date_from)
+                    .sort("time", descending=True)
+                    .limit(count)
+                    .select([
+                        pl.col("time").dt.epoch("s").cast(pl.Int64).alias("time"),
+
+                        pl.col("open"),
+                        pl.col("high"),
+                        pl.col("low"),
+                        pl.col("close"),
+                        pl.col("tick_volume"),
+                        pl.col("spread"),
+                        pl.col("real_volume"),
+                    ])
+                    .collect(engine="auto")
+                ).to_dicts()
+
+                rates = np.array(rates)[::-1] # reverse an array so it becomes oldest -> newest
+                
+            
+            except Exception as e:
+                config.tester_logger.warn(f"Failed to copy rates {e}")
+                return np.array(dict())
+        else:
+            
+            rates = self.mt5_instance.copy_rates_from(symbol, timeframe, date_from, count)
+            rates = np.array(self.__mt5_rates_to_dicts(rates))
+            
+            if rates is None:
+                config.simulator_logger.warn(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                return np.array(dict())
+            
+        return rates
+        
+        
     def run_toolbox_gui(self):
         
         """
@@ -586,7 +687,15 @@ class TradeSimulator:
             
         return True
 
-    def _open_position(self, pos_type: str, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "") -> bool:
+    def _open_position(self, 
+                       pos_type: str,
+                       volume: float,
+                       symbol: str,
+                       open_price: float,
+                       sl: float = 0.0,
+                       tp: float = 0.0,
+                       comment: str = "", 
+                       magic_number: int=-1) -> bool:
 
         position_info = self.position_info.copy()
 
@@ -600,7 +709,7 @@ class TradeSimulator:
 
         position_info["time"] = self.m_symbol.time(timezone=pytz.UTC)
         position_info["id"] = self.id
-        position_info["magic"] = self.magic_number
+        position_info["magic"] = magic_number
         position_info["symbol"] = symbol
         position_info["type"] = pos_type
         position_info["volume"] = volume
@@ -689,7 +798,8 @@ class TradeSimulator:
                                tp: float = 0.0,
                                comment: str = "",
                                expiry_date: datetime = None,
-                               expiration_mode: str="gtc"
+                               expiration_mode: str="gtc",
+                               magic_number: int=-1
                                ):
         
         order_types = ["buy limit", "buy stop", "sell limit", "sell stop"]
@@ -738,7 +848,7 @@ class TradeSimulator:
         order_info["sl"] = sl
         order_info["tp"] = tp
         order_info["comment"] = comment
-        order_info["magic"] = self.magic_number
+        order_info["magic"] = magic_number
         order_info["margin_required"] = self._calculate_margin(symbol=symbol, volume=volume, open_price=open_price)
         
         order_info["expiry_date"] = expiry_date
@@ -879,7 +989,6 @@ class TradeSimulator:
             print(f"Warning: An Order with ID {selected_order['id']} not found!")
             return False
 
-    
     def monitor_pending_orders(self):
         
         now = datetime.now(tz=pytz.UTC)
