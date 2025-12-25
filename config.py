@@ -5,9 +5,6 @@ from datetime import datetime, timezone
 
 is_debug = True
 
-ticks_chunk_size = 1e5  # Number of ticks to fetch in one chunk
-hist_bars_chunk_size = 1000  # Number of bars to fetch in one chunk
-
 HISTORY_DIR = "History"  # Folder name for storing history data
 
 BARS_HISTORY_DIR = os.path.join(HISTORY_DIR, "Bars")
@@ -25,11 +22,9 @@ LOG_DATE = log_date_suffix()
 
 def get_logger(task_name: str, logfile: str, level=logging.INFO):
     """
-    Returns a logger named like:
-    tester.log20250101
-    simulator.log20250101
+        Returns a logger
     """
-    logger_name = f"{task_name}.log{LOG_DATE}"
+    logger_name = f"{task_name}"
     logger = logging.getLogger(logger_name)
     logger.setLevel(level)
 
@@ -46,6 +41,7 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
         backupCount=5,
         encoding="utf-8",
     )
+    
     file_handler.setFormatter(formatter)
     file_handler.setLevel(level)
 
