@@ -363,8 +363,8 @@ class Simulator:
                         pl.col("time_msc"),
                         pl.col("flags"),
                         pl.col("volume_real"),
-                    ]) # return only what's required 
-                    .collect(engine="streaming") # the streming engine, doesn't store data in memory
+                    ]) 
+                    .collect(engine="streaming") # the streaming engine, doesn't store data in memory
                 ).to_dicts()
 
                 ticks = np.array(ticks)
@@ -382,6 +382,75 @@ class Simulator:
                 return np.array(dict())
             
         return ticks
+    
+    
+    def copy_ticks_range(self, symbol: str, date_from: datetime, date_to: datetime, flags: int=mt5.COPY_TICKS_ALL) -> np.array:
+        
+        """Get ticks for the specified date range from the MetaTrader 5 terminal.
+
+        Args:
+            symbol(str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            date_from(datetime): Date of opening of the first bar from the requested sample. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Required unnamed parameter.
+
+            date_to(datetime): Date, up to which the ticks are requested. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Required unnamed parameter.
+            flags(int): A flag to define the type of the requested ticks. COPY_TICKS_INFO – ticks with Bid and/or Ask changes, COPY_TICKS_TRADE – ticks with changes in Last and Volume, COPY_TICKS_ALL – all ticks. Flag values are described in the COPY_TICKS enumeration. Required unnamed parameter.
+
+        Returns:
+            Returns ticks as the numpy array with the named time, bid, ask, last and flags columns. The 'flags' value can be a combination of flags from the TICK_FLAG enumeration. Return None in case of an error. The info on the error can be obtained using last_error().
+        """
+        
+        date_from = utils.ensure_utc(date_from)
+        date_to = utils.ensure_utc(date_to)
+        
+        flag_mask = self.__tick_flag_mask(flags)
+
+        if self.IS_TESTER:    
+            
+            path = os.path.join(config.TICKS_HISTORY_DIR, symbol)
+            lf = pl.scan_parquet(path)
+
+            try:
+                ticks = (
+                    lf
+                    .filter(
+                            (pl.col("time") >= pl.lit(date_from)) &
+                            (pl.col("time") <= pl.lit(date_to))
+                        ) # get ticks between date_from and date_to
+                    .filter((pl.col("flags") & flag_mask) != 0)
+                    .sort(
+                        ["time", "time_msc"],
+                        descending=[False, False]
+                    )
+                    .select([
+                        pl.col("time").dt.epoch("s").cast(pl.Int64).alias("time"),
+
+                        pl.col("bid"),
+                        pl.col("ask"),
+                        pl.col("last"),
+                        pl.col("volume"),
+                        pl.col("time_msc"),
+                        pl.col("flags"),
+                        pl.col("volume_real"),
+                    ]) 
+                    .collect(engine="streaming") # the streaming engine, doesn't store data in memory
+                ).to_dicts()
+
+                ticks = np.array(ticks)
+            
+            except Exception as e:
+                self.__GetLogger().warning(f"Failed to copy ticks {e}")
+                return np.array(dict())
+        else:
+            
+            ticks = self.mt5_instance.copy_ticks_range(symbol, date_from, date_to, flags)
+            ticks = np.array(self.__mt5_data_to_dicts(ticks))
+            
+            if ticks is None:
+                self.__GetLogger().warning(f"Failed to copy ticks. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                return np.array(dict())
+            
+        return ticks
+    
 
     def run_toolbox_gui(self):
         
