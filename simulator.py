@@ -5,7 +5,9 @@ import pytz
 import sqlite3
 import os
 import numpy as np
-from types import SimpleNamespace
+import fnmatch
+from typing import Optional, Tuple
+from collections import namedtuple
 import polars as pl
 import utils
 import config
@@ -26,6 +28,69 @@ class Simulator:
         self.filling_type = None
         self.id = 0
         self.m_symbol = CSymbolInfo(self.mt5_instance)
+        
+        # ----------------- TradeOrder --------------------------
+        
+        self.TradeOrder = namedtuple(
+            "TradeOrder",
+            [
+                "ticket",
+                "time_setup",
+                "time_setup_msc",
+                "time_done",
+                "time_done_msc",
+                "time_expiration",
+                "type",
+                "type_time",
+                "type_filling",
+                "state",
+                "magic",
+                "position_id",
+                "position_by_id",
+                "reason",
+                "volume_initial",
+                "volume_current",
+                "price_open",
+                "sl",
+                "tp",
+                "price_current",
+                "price_stoplimit",
+                "symbol",
+                "comment",
+                "external_id",
+            ]
+        )
+        
+        self.__orders_container__ = []
+        
+        # ----------------- TradePosition -----------------
+        
+        self.TradePosition = namedtuple(
+            "TradePosition",
+            [
+                "ticket",
+                "time",
+                "time_msc",
+                "time_update",
+                "time_update_msc",
+                "type",
+                "magic",
+                "identifier",
+                "reason",
+                "volume",
+                "price_open",
+                "sl",
+                "tp",
+                "price_current",
+                "swap",
+                "profit",
+                "symbol",
+                "comment",
+                "external_id",
+            ]
+        )
+        
+        self.__positions_container__ = []
         
         self.leverage = int(leverage.split(":")[1])
 
@@ -468,15 +533,179 @@ class Simulator:
         
         """Get the number of active orders.
         
-        Returns (int):
-            list: number of active orders in either a simulator or MetaTrader 5
+        Returns (int): The number of active orders in either a simulator or MetaTrader 5
         """
         
         return len(self.orders_container) if self.IS_TESTER else self.mt5_instance.orders_total()
     
-    def get_orders(self) -> list:
+    def orders_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
+                
+        """Get active orders with the ability to filter by symbol or ticket. There are three call options.
+
+        Args:
+            symbol (str | optional): Symbol name. If a symbol is specified, the ticket parameter is ignored.
+            group (str | optional): The filter for arranging a group of necessary symbols. If the group is specified, the function returns only active orders meeting a specified criteria for a symbol name.
+            
+            ticket (int | optional): Order ticket (ORDER_TICKET).
         
-        return [order for order in self.orders_container]
+        Returns:
+        
+            list: Returns info in the form of a named tuple structure (namedtuple). Return None in case of an error. The info on the error can be obtained using last_error().
+        """
+        """
+        order1 = self.TradeOrder(
+            ticket=123456,
+            time_setup=int(datetime.now().timestamp()),
+            time_setup_msc=int(datetime.now().timestamp() * 1000),
+            time_done=0,
+            time_done_msc=0,
+            time_expiration=0,
+            type=mt5.ORDER_TYPE_BUY_LIMIT,
+            type_time=0,
+            type_filling=mt5.ORDER_FILLING_RETURN,
+            state=mt5.ORDER_STATE_PLACED,
+            magic=0,
+            position_id=0,
+            position_by_id=0,
+            reason=0,
+            volume_initial=0.01,
+            volume_current=0.01,
+            price_open=1.1750,
+            sl=1.1700,
+            tp=1.1800,
+            price_current=1.1750,
+            price_stoplimit=0.0,
+            symbol="GBPUSD",
+            comment="",
+            external_id="",
+        )
+
+        order2 = self.TradeOrder(
+            ticket=123457,
+            time_setup=int(datetime.now().timestamp()),
+            time_setup_msc=int(datetime.now().timestamp() * 1000),
+            time_done=0,
+            time_done_msc=0,
+            time_expiration=0,
+            type=mt5.ORDER_TYPE_SELL_LIMIT,
+            type_time=0,
+            type_filling=mt5.ORDER_FILLING_RETURN,
+            state=mt5.ORDER_STATE_PLACED,
+            magic=0,
+            position_id=0,
+            position_by_id=0,
+            reason=0,
+            volume_initial=0.01,
+            volume_current=0.01,
+            price_open=1.1800,
+            sl=1.1850,
+            tp=1.1700,
+            price_current=1.1800,
+            price_stoplimit=0.0,
+            symbol="EURUSD",
+            comment="",
+            external_id="",
+        )
+        
+        self.__orders_container__.extend([order1, order2])
+        """
+        if self.IS_TESTER:
+            
+            orders = self.__orders_container__
+
+            # no filters → return all orders
+            if symbol is None and group is None and ticket is None:
+                return tuple(orders)
+
+            # symbol filter (highest priority)
+            if symbol is not None:
+                return tuple(o for o in orders if o.symbol == symbol)
+
+            # group filter
+            if group is not None:
+                return tuple(o for o in orders if fnmatch.fnmatch(o.symbol, group))
+
+            # ticket filter
+            if ticket is not None:
+                return tuple(o for o in orders if o.ticket == ticket)
+
+            return tuple()
+        
+        try:
+            if symbol is not None:
+                return self.mt5_instance.orders_get(symbol=symbol)
+
+            if group is not None:
+                return self.mt5_instance.orders_get(group=group)
+
+            if ticket is not None:
+                return self.mt5_instance.orders_get(ticket=ticket)
+
+            return self.mt5_instance.orders_get()
+
+        except Exception:
+            return None
+
+    def positions_total(self) -> int:
+        """Get the number of open positions in MetaTrader 5 client.
+
+        Returns:
+            int: number of positions
+        """
+        
+        return len(self.__positions_container__) if self.IS_TESTER else self.mt5_instance.positions_total()
+
+    def positions_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
+        
+        """Get open positions with the ability to filter by symbol or ticket. There are three call options.
+
+        Args:
+            symbol (str | optional): Symbol name. If a symbol is specified, the ticket parameter is ignored.
+            group (str | optional): The filter for arranging a group of necessary symbols. Optional named parameter. If the group is specified, the function returns only positions meeting a specified criteria for a symbol name.
+            
+            ticket (int | optional): Position ticket -> https://www.mql5.com/en/docs/constants/tradingconstants/positionproperties#enum_position_property_integer
+        
+        Returns:
+        
+            list: Returns info in the form of a named tuple structure (namedtuple). Return None in case of an error. The info on the error can be obtained using last_error().
+        """
+        
+        if self.IS_TESTER:
+            
+            positions = self.__positions_container__
+
+            # no filters → return all positions
+            if symbol is None and group is None and ticket is None:
+                return tuple(positions)
+
+            # symbol filter (highest priority)
+            if symbol is not None:
+                return tuple(o for o in positions if o.symbol == symbol)
+
+            # group filter
+            if group is not None:
+                return tuple(o for o in positions if fnmatch.fnmatch(o.symbol, group))
+
+            # ticket filter
+            if ticket is not None:
+                return tuple(o for o in positions if o.ticket == ticket)
+
+            return tuple()
+        
+        try:
+            if symbol is not None:
+                return self.mt5_instance.positions_get(symbol=symbol)
+
+            if group is not None:
+                return self.mt5_instance.positions_get(group=group)
+
+            if ticket is not None:
+                return self.mt5_instance.positions_get(ticket=ticket)
+
+            return self.mt5_instance.positions_get()
+
+        except Exception:
+            return None
 
     def get_deals(self, start_time: datetime = None, end_time: datetime = None, from_db: bool = False) -> list:
         
