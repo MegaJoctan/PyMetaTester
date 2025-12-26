@@ -118,7 +118,7 @@ class Simulator:
         
         return self.symbol_info_cache[symbol]
 
-    def __mt5_rates_to_dicts(self, rates) -> list[dict]:
+    def __mt5_data_to_dicts(self, rates) -> list[dict]:
         
         if rates is None or len(rates) == 0:
             return []
@@ -185,7 +185,7 @@ class Simulator:
         else:
             
             rates = self.mt5_instance.copy_rates_from(symbol, timeframe, date_from, count)
-            rates = np.array(self.__mt5_rates_to_dicts(rates))
+            rates = np.array(self.__mt5_data_to_dicts(rates))
             
             if rates is None:
                 self.__GetLogger().warning(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
@@ -208,10 +208,10 @@ class Simulator:
         Get bars from the MetaTrader 5 terminal starting from the specified index.
         
         Parameters:
-            symbol(str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
-            timeframe(int): MT5 timeframe the bars are requested for.
-            start_pos(int): Initial index of the bar the data are requested from. The numbering of bars goes from present to past. Thus, the zero bar means the current one. Required unnamed parameter.
-            count(int): Number of bars to receive. Required unnamed parameter.
+            symbol (str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            timeframe (int): MT5 timeframe the bars are requested for.
+            start_pos (int): Initial index of the bar the data are requested from. The numbering of bars goes from present to past. Thus, the zero bar means the current one. Required unnamed parameter.
+            count (int): Number of bars to receive. Required unnamed parameter.
 
         Returns:
             Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Returns None in case of an error. The info on the error can be obtained using last_error().
@@ -232,14 +232,156 @@ class Simulator:
         else:
             
             rates = self.mt5_instance.copy_rates_from_pos(symbol, timeframe, start_pos, count)
-            rates = np.array(self.__mt5_rates_to_dicts(rates))
+            rates = np.array(self.__mt5_data_to_dicts(rates))
             
             if rates is None:
                 self.__GetLogger().warning(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
                 return np.array(dict())
             
         return rates
+    
+    def copy_rates_range(self, symbol: str, timeframe: int, date_from: datetime, date_to: datetime):
+        """Get bars in the specified date range from the MetaTrader 5 terminal.
+
+        Args:
+            symbol (str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            timeframe (int): Timeframe the bars are requested for. Set by a value from the TIMEFRAME enumeration. Required unnamed parameter.
+            date_from (datetime): Date the bars are requested from. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Bars with the open time >= date_from are returned. Required unnamed parameter.
+            date_to (datetime): Date, up to which the bars are requested. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Bars with the open time <= date_to are returned. Required unnamed parameter.
+            
+            Returns:
+                Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Returns None in case of an error. The info on the error can be obtained using MetaTrader5.last_error().
+        """
         
+        date_from = utils.ensure_utc(date_from)
+        date_to = utils.ensure_utc(date_to)
+        
+        if self.IS_TESTER:    
+            
+            # instead of getting data from MetaTrader 5, get data stored in our custom directories
+            
+            path = os.path.join(config.BARS_HISTORY_DIR, symbol, utils.TIMEFRAMES_REV[timeframe])
+            lf = pl.scan_parquet(path)
+
+            try:
+                rates = (
+                    lf
+                    .filter(
+                            (pl.col("time") >= pl.lit(date_from)) &
+                            (pl.col("time") <= pl.lit(date_to))
+                        ) # get bars between date_from and date_to
+                    .sort("time", descending=True) 
+                    .select([
+                        pl.col("time").dt.epoch("s").cast(pl.Int64).alias("time"),
+
+                        pl.col("open"),
+                        pl.col("high"),
+                        pl.col("low"),
+                        pl.col("close"),
+                        pl.col("tick_volume"),
+                        pl.col("spread"),
+                        pl.col("real_volume"),
+                    ]) # return only what's required 
+                    .collect(engine="streaming") # the streming engine, doesn't store data in memory
+                ).to_dicts()
+
+                rates = np.array(rates)[::-1] # reverse an array so it becomes oldest -> newest
+            
+            except Exception as e:
+                self.__GetLogger().warning(f"Failed to copy rates {e}")
+                return np.array(dict())
+        else:
+            
+            rates = self.mt5_instance.copy_rates_range(symbol, timeframe, date_from, date_to)
+            rates = np.array(self.__mt5_data_to_dicts(rates))
+            
+            if rates is None:
+                self.__GetLogger().warning(f"Failed to copy rates. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                return np.array(dict())
+            
+        return rates
+
+    def __tick_flag_mask(self, flags: int) -> int:
+        if flags == mt5.COPY_TICKS_ALL:
+            return (
+                mt5.TICK_FLAG_BID
+                | mt5.TICK_FLAG_ASK
+                | mt5.TICK_FLAG_LAST
+                | mt5.TICK_FLAG_VOLUME
+                | mt5.TICK_FLAG_BUY
+                | mt5.TICK_FLAG_SELL
+            )
+
+        mask = 0
+        if flags & mt5.COPY_TICKS_INFO:
+            mask |= mt5.TICK_FLAG_BID | mt5.TICK_FLAG_ASK
+        if flags & mt5.COPY_TICKS_TRADE:
+            mask |= mt5.TICK_FLAG_LAST | mt5.TICK_FLAG_VOLUME
+
+        return mask
+
+    def copy_ticks_from(self, symbol: str, date_from: datetime, count: int, flags: int=mt5.COPY_TICKS_ALL) -> np.array:
+        
+        """Get ticks from the MetaTrader 5 terminal starting from the specified date.
+
+        Args:
+            symbol(str): Financial instrument name, for example, "EURUSD". Required unnamed parameter.
+            date_from(datetime): Date of opening of the first bar from the requested sample. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. Required unnamed parameter.
+
+            count(int): Number of ticks to receive. Required unnamed parameter.
+            flags(int): A flag to define the type of the requested ticks. COPY_TICKS_INFO – ticks with Bid and/or Ask changes, COPY_TICKS_TRADE – ticks with changes in Last and Volume, COPY_TICKS_ALL – all ticks. Flag values are described in the COPY_TICKS enumeration. Required unnamed parameter.
+
+        Returns:
+            Returns ticks as the numpy array with the named time, bid, ask, last and flags columns. The 'flags' value can be a combination of flags from the TICK_FLAG enumeration. Return None in case of an error. The info on the error can be obtained using last_error().
+        """
+        
+        date_from = utils.ensure_utc(date_from)
+        flag_mask = self.__tick_flag_mask(flags)
+
+        if self.IS_TESTER:    
+            
+            path = os.path.join(config.TICKS_HISTORY_DIR, symbol)
+            lf = pl.scan_parquet(path)
+
+            try:
+                ticks = (
+                    lf
+                    .filter(pl.col("time") >= pl.lit(date_from)) # get data starting at the given date
+                    .filter((pl.col("flags") & flag_mask) != 0)
+                    .sort(
+                        ["time", "time_msc"],
+                        descending=[False, False]
+                    )
+                    .limit(count) # limit the request to a specified number of ticks
+                    .select([
+                        pl.col("time").dt.epoch("s").cast(pl.Int64).alias("time"),
+
+                        pl.col("bid"),
+                        pl.col("ask"),
+                        pl.col("last"),
+                        pl.col("volume"),
+                        pl.col("time_msc"),
+                        pl.col("flags"),
+                        pl.col("volume_real"),
+                    ]) # return only what's required 
+                    .collect(engine="streaming") # the streming engine, doesn't store data in memory
+                ).to_dicts()
+
+                ticks = np.array(ticks)
+            
+            except Exception as e:
+                self.__GetLogger().warning(f"Failed to copy ticks {e}")
+                return np.array(dict())
+        else:
+            
+            ticks = self.mt5_instance.copy_ticks_from(symbol, date_from, count, flags)
+            ticks = np.array(self.__mt5_data_to_dicts(ticks))
+            
+            if ticks is None:
+                self.__GetLogger().warning(f"Failed to copy ticks. MetaTrader 5 error = {self.mt5_instance.last_error()}")
+                return np.array(dict())
+            
+        return ticks
 
     def run_toolbox_gui(self):
         
