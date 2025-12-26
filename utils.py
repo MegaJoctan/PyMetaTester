@@ -82,3 +82,16 @@ def month_bounds(dt: datetime):
     end = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
 
     return start, end
+
+def ensure_utc(dt: datetime) -> datetime:
+    """
+    Ensure datetime is timezone-aware and in UTC.
+    - Naive datetimes are assumed to be UTC
+    - Aware datetimes are converted to UTC
+    """
+    if dt.tzinfo is None:
+        # Naive → assume UTC
+        return dt.replace(tzinfo=timezone.utc)
+
+    # Aware → convert to UTC if needed
+    return dt.astimezone(timezone.utc)
