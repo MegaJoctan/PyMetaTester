@@ -464,8 +464,18 @@ class Simulator:
 
         return [pos for pos in self.positions_container]
     
+    def orders_total(self) -> int:
+        
+        """Get the number of active orders.
+        
+        Returns (int):
+            list: number of active orders in either a simulator or MetaTrader 5
+        """
+        
+        return len(self.orders_container) if self.IS_TESTER else self.mt5_instance.orders_total()
+    
     def get_orders(self) -> list:
-
+        
         return [order for order in self.orders_container]
 
     def get_deals(self, start_time: datetime = None, end_time: datetime = None, from_db: bool = False) -> list:
