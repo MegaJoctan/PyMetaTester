@@ -62,6 +62,7 @@ class Simulator:
         )
         
         self.__orders_container__ = []
+        self.__orders_history_container__ = []
         
         # ----------------- TradePosition -----------------
         
@@ -91,6 +92,33 @@ class Simulator:
         )
         
         self.__positions_container__ = []
+        
+        # ----------------- TradeDeal -----------------
+        
+        self.TradeDeal = namedtuple(
+            "TradeDeal",
+            [
+                "ticket",        # DEAL_TICKET
+                "order",         # DEAL_ORDER
+                "time",          # DEAL_TIME (seconds)
+                "time_msc",      # DEAL_TIME_MSC
+                "type",          # DEAL_TYPE
+                "entry",         # DEAL_ENTRY
+                "magic",         # DEAL_MAGIC
+                "position_id",   # DEAL_POSITION_ID
+                "reason",        # DEAL_REASON
+                "volume",        # DEAL_VOLUME
+                "price",         # DEAL_PRICE
+                "commission",    # DEAL_COMMISSION
+                "swap",          # DEAL_SWAP
+                "profit",        # DEAL_PROFIT
+                "fee",           # DEAL_FEE
+                "symbol",        # DEAL_SYMBOL
+                "comment",       # DEAL_COMMENT
+                "external_id",   # DEAL_EXTERNAL_ID
+            ]
+        )
+        self.__deals_history_container__ = []
         
         self.leverage = int(leverage.split(":")[1])
 
@@ -525,10 +553,6 @@ class Simulator:
         
         self.toolbox_gui.update(self.account_info, self.positions_container, self.orders_container)
     
-    def get_positions(self) -> list:
-
-        return [pos for pos in self.positions_container]
-    
     def orders_total(self) -> int:
         
         """Get the number of active orders.
@@ -536,7 +560,15 @@ class Simulator:
         Returns (int): The number of active orders in either a simulator or MetaTrader 5
         """
         
-        return len(self.orders_container) if self.IS_TESTER else self.mt5_instance.orders_total()
+        if self.IS_TESTER:
+            return len(self.orders_container)
+        try:
+            total = self.mt5_instance.orders_total()
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return -1
+        
+        return total
     
     def orders_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
                 
@@ -643,7 +675,8 @@ class Simulator:
 
             return self.mt5_instance.orders_get()
 
-        except Exception:
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
             return None
 
     def positions_total(self) -> int:
@@ -653,7 +686,15 @@ class Simulator:
             int: number of positions
         """
         
-        return len(self.__positions_container__) if self.IS_TESTER else self.mt5_instance.positions_total()
+        if self.IS_TESTER:
+            return len(self.__positions_container__)        
+        try:
+            total = self.mt5_instance.positions_total()
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return -1
+        
+        return total
 
     def positions_get(self, symbol: Optional[str] = None, group: Optional[str] = None, ticket: Optional[int] = None) -> namedtuple:
         
@@ -704,121 +745,231 @@ class Simulator:
 
             return self.mt5_instance.positions_get()
 
-        except Exception:
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
             return None
 
-    def get_deals(self, start_time: datetime = None, end_time: datetime = None, from_db: bool = False) -> list:
+    def history_orders_total(self, date_from: datetime, date_to: datetime) -> int:
         
-        if start_time is None or end_time is None:
-            raise ValueError("Both start_time and end_time must be provided")
+        # date range is a requirement
         
-        # Auto-swap if dates are in the wrong order
-        if start_time > end_time:
-            print("Swapping start_time and end_time for correct comparison.")
-            start_time, end_time = end_time, start_time
-
-        if from_db:
-            conn = sqlite3.connect(self.history_db_name)
-            cursor = conn.cursor()
-
-            # Ensure ISO format for datetime strings
-            start_str = start_time.isoformat()
-            end_str = end_time.isoformat()
-
-            cursor.execute('''
-                SELECT * FROM closed_deals
-                WHERE time BETWEEN ? AND ?
-            ''', (start_str, end_str))
-
-            columns = [col[0] for col in cursor.description]
-            results = cursor.fetchall()
-            conn.close()
-
-            # Convert result rows into dicts
-            return [dict(zip(columns, row)) for row in results]
-
-        else:
-            return [
-                deal for deal in self.deals_container
-                if start_time <= deal["time"] <= end_time
-            ]
-
-    def _create_deals_db(self, db_name: str):
+        if date_from is None or date_to is None:
+            self.__GetLogger().error("date_from and date_to must be specified")
+            return None
+            
+        date_from = utils.ensure_utc(date_from)
+        date_to = utils.ensure_utc(date_to)
         
-        """
-        Creates a SQLite database to store trade history and account information.
+        if self.IS_TESTER:
         
-        Args:
-            db_name (str): The name of the database file.
-        """
+            date_from_ts = int(date_from.timestamp())
+            date_to_ts   = int(date_to.timestamp())
+            
+            return sum(
+                        1
+                        for o in self.__orders_history_container__
+                        if date_from_ts <= o.time_setup <= date_to_ts
+                    )
+
+        try:
+            total = self.mt5_instance.history_orders_total(date_from, date_to)
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return -1
         
-        conn = sqlite3.connect(db_name)
-        cursor = conn.cursor()
-
-        # Create tables if they do not exist
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS closed_deals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                time TEXT,
-                magic INTEGER,
-                symbol TEXT,
-                type TEXT,
-                direction TEXT,
-                volume REAL,
-                price REAL,
-                sl REAL,
-                tp REAL,
-                commission REAL,
-                margin_required REAL,
-                fee REAL,
-                swap REAL,
-                profit REAL,
-                comment TEXT,
-                reason TEXT
-            )
-        ''')
-        
-        conn.commit() 
-        conn.close()
-
-    def _save_deal(self, deal: dict, db_name: str):
-        """
-            Saves a closed deal to the SQLite database.
-        """
-        
-        conn = sqlite3.connect(db_name)
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            INSERT INTO closed_deals (
-                time, magic, symbol, type, direction, volume, price, sl, tp,
-                commission, margin_required, fee, swap, profit, comment, reason
-            ) VALUES (
-                :time, :magic, :symbol, :type, :direction, :volume, :price, :sl, :tp,
-                :commission, :margin_required, :fee, :swap, :profit, :comment, :reason
-            );
-        """, deal)
-
-        conn.commit()
-        conn.close()
+        return total
     
-    def set_magicnumber(self, magic_number: int):
+    def history_orders_get(self, 
+                           date_from: datetime,
+                           date_to: datetime,
+                           group: Optional[str] = None,
+                           ticket: Optional[int] = None,
+                           position: Optional[int] = None
+                           ) -> namedtuple:
         
-        self.magic_number = magic_number
+        if self.IS_TESTER:
+
+            orders = self.__orders_history_container__
+
+            # ticket filter (highest priority)
+            if ticket is not None:
+                return tuple(o for o in orders if o.ticket == ticket)
+
+            # position filter
+            if position is not None:
+                return tuple(o for o in orders if o.position_id == position)
+
+            # date range is a requirement  
+            if date_from is None or date_to is None:
+                self.__GetLogger().error("date_from and date_to must be specified")
+                return None
+
+            date_from_ts = int(utils.ensure_utc(date_from).timestamp())
+            date_to_ts   = int(utils.ensure_utc(date_to).timestamp())
+
+            filtered = (
+                o for o in orders
+                if date_from_ts <= o.time_setup <= date_to_ts
+            ) # obtain orders that fall within this time range
+
+            # optional group filter
+            if group is not None:
+                filtered = (
+                    o for o in filtered
+                    if fnmatch.fnmatch(o.symbol, group)
+                )
+
+            return tuple(filtered)
+    
+        try: # we are not on the strategy tester simulation
+            
+            if ticket is not None:
+                return self.mt5_instance.history_orders_get(date_from, date_to, ticket=ticket)
+
+            if position is not None:
+                return self.mt5_instance.history_orders_get(date_from, date_to, position=position)
+
+            if date_from is None or date_to is None:
+                raise ValueError("date_from and date_to are required")
+
+            date_from = utils.ensure_utc(date_from)
+            date_to   = utils.ensure_utc(date_to)
+
+            if group is not None:
+                return self.mt5_instance.history_orders_get(
+                    date_from, date_to, group=group
+                )
+
+            return self.mt5_instance.history_orders_get(date_from, date_to)
+
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return None
+    
+    def history_deals_total(self, date_from: datetime, date_to: datetime) -> int:
+        """
+        Get the number of deals in history within the specified date range.
+
+        Args:
+            date_from (datetime): Date the orders are requested from. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. 
+            
+            date_to (datetime, required): Date, up to which the orders are requested. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01.
         
-    def set_deviation_in_points(self, deviation_points: int):
-        
-        self.deviation_points = deviation_points
-        
-    """
-    def set_filling_type_by_symbol(self, symbol: int):
-        
-        self.filling_type = self._get_type_filling(symbol)
-        
-        if self.filling_type == -1:
-            print(f"Failed to set filling type for '{symbol}'")
-    """
-        
+        Returns:
+            An integer value.
+        """
+
+        if date_from is None or date_to is None:
+            self.__GetLogger().error("date_from and date_to must be specified")
+            return -1
+
+        date_from = utils.ensure_utc(date_from)
+        date_to   = utils.ensure_utc(date_to)
+
+        if self.IS_TESTER:
+
+            date_from_ts = int(date_from.timestamp())
+            date_to_ts   = int(date_to.timestamp())
+
+            return sum(
+                1
+                for d in self.__deals_history_container__
+                if date_from_ts <= d.time <= date_to_ts
+            )
+
+        try:
+            return self.mt5_instance.history_deals_total(date_from, date_to)
+
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return -1
+    
+    def history_deals_get(self,
+                          date_from: datetime,
+                          date_to: datetime,
+                          group: Optional[str] = None,
+                          ticket: Optional[int] = None,
+                          position: Optional[int] = None
+                        ) -> namedtuple:
+        """Gets deals from trading history within the specified interval with the ability to filter by ticket or position.
+
+        Args:
+            date_from (datetime): Date the orders are requested from. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01. 
+            
+            date_to (datetime, required): Date, up to which the orders are requested. Set by the 'datetime' object or as a number of seconds elapsed since 1970.01.01.
+            
+            group (str, optional):  The filter for arranging a group of necessary symbols. Optional named parameter. If the group is specified, the function returns only deals meeting a specified criteria for a symbol name.
+            
+            ticket (int, optional): Ticket of an order (stored in DEAL_ORDER) all deals should be received for. If not specified, the filter is not applied.
+            
+            position (int, optional): Ticket of a position (stored in DEAL_POSITION_ID) all deals should be received for. If not specified, the filter is not applied.
+
+        Raises:
+            ValueError: MetaTrader5 error
+
+        Returns:
+            namedtuple: information about deals
+        """
+                
+        if self.IS_TESTER:
+
+            deals = self.__deals_history_container__
+
+            # ticket filter (highest priority)
+            if ticket is not None:
+                return tuple(d for d in deals if d.ticket == ticket)
+
+            # position filter
+            if position is not None:
+                return tuple(d for d in deals if d.position_id == position)
+
+            # date range is a requirement  
+            if date_from is None or date_to is None:
+                self.__GetLogger().error("date_from and date_to must be specified")
+                return None
+
+            date_from_ts = int(utils.ensure_utc(date_from).timestamp())
+            date_to_ts   = int(utils.ensure_utc(date_to).timestamp())
+
+            filtered = (
+                d for d in deals
+                if date_from_ts <= d.time <= date_to_ts
+            ) # obtain orders that fall within this time range
+
+            # optional group filter
+            if group is not None:
+                filtered = (
+                    d for d in filtered
+                    if fnmatch.fnmatch(d.symbol, group)
+                )
+
+            return tuple(filtered)
+    
+        try: # we are not on the strategy tester simulation
+            
+            if ticket is not None:
+                return self.mt5_instance.history_deals_get(date_from, date_to, ticket=ticket)
+
+            if position is not None:
+                return self.mt5_instance.history_deals_get(date_from, date_to, position=position)
+
+            if date_from is None or date_to is None:
+                raise ValueError("date_from and date_to are required")
+
+            date_from = utils.ensure_utc(date_from)
+            date_to   = utils.ensure_utc(date_to)
+
+            if group is not None:
+                return self.mt5_instance.history_deals_get(
+                    date_from, date_to, group=group
+                )
+
+            return self.mt5_instance.history_deals_get(date_from, date_to)
+
+        except Exception as e:
+            self.__GetLogger().error(f"MetaTrader5 error = {e}")
+            return None
+    
     def _calculate_profit(self, action: str, symbol: str, entry_price: float, exit_price: float, lotsize: float) -> float:
         
         """
@@ -846,13 +997,6 @@ class Simulator:
         )
         
         return profit
-        
-    def market_update(self, ask: float, bid: float, time: datetime):
-        """
-        self.ask = ask
-        self.bid = bid
-        self.time = time
-        """
     
     def monitor_account(self, verbose: bool):
         
