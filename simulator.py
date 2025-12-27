@@ -1,8 +1,9 @@
 import MetaTrader5 as mt5
 from Trade.SymbolInfo import CSymbolInfo
 from datetime import datetime, timedelta, timezone
+import secrets
+import time
 import pytz
-import sqlite3
 import os
 import numpy as np
 import fnmatch
@@ -12,6 +13,7 @@ import polars as pl
 import utils
 import config
 from toolbox_gui import SimToolboxGUI
+from validators import TradeValidators
 
 if config.is_debug:
     np.set_printoptions(
@@ -970,6 +972,161 @@ class Simulator:
             self.__GetLogger().error(f"MetaTrader5 error = {e}")
             return None
     
+    def __generate_deal_ticket(self) -> int:
+        return len(self.__deals_history_container__)+1
+    
+    def __generate_order_ticket(self) -> int:
+        ts = int(time.time_ns())
+        rand = secrets.randbits(20)
+        return (ts << 20) | rand
+
+    def __generate_position_ticket(self) -> int:
+        ts = int(time.time_ns())
+        rand = secrets.randbits(24)
+        return (ts << 24) | rand
+
+    def __calc_commision(self) -> float:
+        
+    
+    def order_send(self, request: dict):
+
+        now = datetime.now(timezone.utc)
+        now_ts = int(now.timestamp())
+        now_msc = int(now.timestamp() * 1000)
+
+        action = request.get("action")
+        symbol = request.get("symbol")
+        volume = request.get("volume", 0.0)
+        price  = request.get("price", 0.0)
+        sl     = request.get("sl", 0.0)
+        tp     = request.get("tp", 0.0)
+        order_type = request.get("type")
+
+        # ---------------- Validate a position -------------
+        
+        validators = TradeValidators(symbol_info=self.symbol_info(symbol),
+                                     ticks_info=self.tick,
+                                     logger=self.__GetLogger())
+        
+        if not validators.all_validators(
+                symbol=symbol,
+                lotsize=volume,
+                entry=price,
+                sl=sl,
+                tp=tp,
+                margin_required=self.account_info["margin_required"],
+                free_margin=self._calculate_margin(symbol=symbol, volume=volume, open_price=price)
+            ):
+            return
+        
+        position_id = self.__generate_position_ticket()
+        ticket = self.__generate_order_ticket()
+        
+        # ---------------- Market Exectution ----------------
+        
+        if action == self.mt5_instance.TRADE_ACTION_DEAL:
+
+            # Create DEAL
+            deal = self.TradeDeal(
+                ticket=self.__generate_deal_ticket(),
+                order=ticket,
+                time=now_ts,
+                time_msc=now_msc,
+                type=order_type,
+                entry=mt5.DEAL_ENTRY_IN,
+                magic=request.get("magic", 0),
+                position_id=position_id,
+                reason=mt5.DEAL_REASON_EXPERT,
+                volume=volume,
+                price=price,
+                commission=self.__calc_commission(volume),
+                swap=0.0,
+                profit=0.0,
+                fee=0.0,
+                symbol=symbol,
+                comment=request.get("comment", ""),
+                external_id="",
+            )
+
+            self.__deals_history_container__.append(deal)
+
+            # Create POSITION
+            position = self.TradePosition(
+                ticket=position_id,
+                time=now_ts,
+                time_msc=now_msc,
+                time_update=now_ts,
+                time_update_msc=now_msc,
+                type=order_type,
+                magic=request.get("magic", 0),
+                identifier=position_id,
+                reason=mt5.DEAL_REASON_EXPERT,
+                volume=volume,
+                price_open=price,
+                sl=sl,
+                tp=tp,
+                price_current=price,
+                swap=0.0,
+                profit=0.0,
+                symbol=symbol,
+                comment=request.get("comment", ""),
+                external_id="",
+            )
+
+            self.__positions_container__.append(position)
+
+            return {
+                "retcode": mt5.TRADE_RETCODE_DONE,
+                "deal": deal.ticket,
+                "order": ticket,
+                "position": position_id,
+            }
+
+        # --------------- Pending Order ------------------
+
+        elif action == self.mt5_instance.TRADE_ACTION_PENDING:
+
+            order = self.TradeOrder(
+                ticket=ticket,
+                time_setup=now_ts,
+                time_setup_msc=now_msc,
+                time_done=0,
+                time_done_msc=0,
+                time_expiration=request.get("expiration", 0),
+                type=order_type,
+                type_time=request.get("type_time", 0),
+                type_filling=request.get("type_filling", 0),
+                state=mt5.ORDER_STATE_PLACED,
+                magic=request.get("magic", 0),
+                position_id=0,
+                position_by_id=0,
+                reason=mt5.DEAL_REASON_EXPERT,
+                volume_initial=volume,
+                volume_current=volume,
+                price_open=price,
+                sl=sl,
+                tp=tp,
+                price_current=price,
+                price_stoplimit=request.get("price_stoplimit", 0.0),
+                symbol=symbol,
+                comment=request.get("comment", ""),
+                external_id="",
+            )
+
+            self.__orders_container__.append(order)
+
+            return {
+                "retcode": mt5.TRADE_RETCODE_DONE,
+                "order": ticket,
+            }
+
+        # ------------------ Invalid Action ----------------
+        
+        return {
+            "retcode": mt5.TRADE_RETCODE_INVALID,
+            "comment": "Unsupported trade action",
+        }
+    
     def _calculate_profit(self, action: str, symbol: str, entry_price: float, exit_price: float, lotsize: float) -> float:
         
         """
@@ -1065,122 +1222,6 @@ class Simulator:
             if verbose:
                 print(f'sim -> ticket | {pos["id"]} | symbol {pos["symbol"]} | time {pos["time"]} | type {pos["type"]} | volume {pos["volume"]} | sl {pos["sl"]} | tp {pos["tp"]} | profit {pos["profit"]:.2f}')
 
-
-    def _position_validation(self,
-                       volume: float,
-                       symbol: str,
-                       pos_type: str,
-                       open_price: float, 
-                       sl: float = 0.0, 
-                       tp: float = 0.0) -> bool:
-        """
-        Validates trade parameters similar to MQL5's OrderCheck()
-        
-        Returns:
-            bool: True if validation passes, False with error message if fails
-        """
-        
-        self.m_symbol.name(symbol) # Assign the current symbol to the CSymbolInfo class for accessing its properties    
-            
-        # Get symbol properties
-        symbol_info = self.m_symbol.get_info() # Get the information about the current symbol
-        if symbol_info is None:
-            print(f"Trade validation failed. MetaTrader5 error = {self.mt5_instance.last_error()}")
-            return False
-            
-        # Validate volume
-        
-        if volume < self.m_symbol.lots_min(): # check if the received lotsize is smaller than minimum accepted lot of a symbol
-            print(f"Trade validation failed: Volume ({volume}) is less than minimum allowed ({self.m_symbol.lots_min()})")
-            return False
-        if volume > self.m_symbol.lots_max(): # check if the received lotsize is greater than the maximum accepted lot
-            print(f"Trade validation failed: Volume ({volume}) is greater than maximum allowed ({self.m_symbol.lots_max()})")
-            return False
-        
-        step_count = volume / self.m_symbol.lots_step() 
-        
-        if abs(step_count - round(step_count)) > 1e-7: # check if the stoploss is a multiple of the step size
-            print(f"Trade validation failed: Volume ({volume}) must be a multiple of step size ({self.m_symbol.lots_step()})")
-            return False
-            
-        # Validate the opening price
-        
-        self.m_symbol.refresh_rates() # Get recent ticks information
-        
-        ask = self.m_symbol.ask()
-        bid = self.m_symbol.bid()
-        
-        if ask is None or bid is None or ask==0 or bid==0:
-            print("Trade Validate: Failed to Get Ask and Bid prices, Call the function market_update() to update the simulator with newly simulated price values")
-            return False
-        
-        # Slippage check
-        
-        actual_price = ask if pos_type == "buy" else bid
-        point = self.m_symbol.point()
-
-        # Allowable slippage range (in absolute price)
-        
-        max_deviation = self.deviation_points * point
-        lower_bound = actual_price - max_deviation
-        upper_bound = actual_price + max_deviation
-
-        # Check if requested price is within allowed slippage
-        
-        if not (lower_bound <= open_price <= upper_bound):
-            print(f"Trade validation failed: {pos_type.capitalize()} price ({open_price}) is out of slippage range: {lower_bound:.5f} - {upper_bound:.5f}")
-            return False
-            
-        # Validate stop loss and take profit levels
-        
-        if sl > 0:
-            if pos_type == "buy" and sl >= open_price:
-                print(f"Trade validation failed: Buy stop loss ({sl}) must be below order opening price ({open_price})")
-                return False
-            if pos_type == "sell" and sl <= open_price:
-                print(f"Trade validation failed: Sell stop loss ({sl}) must be above order opening price ({open_price})")
-                return False
-            if not self._check_stops_level(symbol, open_price, sl, pos_type):
-                return False
-                
-        if tp > 0:
-            if pos_type == "buy" and tp <= open_price:
-                print(f"Trade validation failed: Buy take profit ({tp}) must be above order opening price ({open_price})")
-                return False
-            if pos_type == "sell" and tp >= open_price:
-                print(f"Trade validation failed: Sell take profit ({tp}) must be below order opening price ({open_price})")
-                return False
-            if not self._check_stops_level(symbol, open_price, tp, pos_type):
-                return False
-            
-        # Validate margin requirements
-        
-        margin_required = self._calculate_margin(symbol=symbol, volume=volume, open_price=open_price) #TODO:
-                
-        if margin_required is None:
-            print("Trade validation failed: Cannot calculate margin requirements")
-            return False
-        
-        # Check free margin
-        if margin_required > self.account_info["free_margin"]:
-            print(f'Trade validation failed: Not enough money to open trade. '
-                f'Required: {margin_required:.2f}, '
-                f'Free margin: {self.account_info["free_margin"]:.2f}')
-            
-            return False
-
-        # Check margin level (if positions exist)
-        if self.account_info["margin_level"] is not None and self.account_info["margin_level"] > 0:
-            if (self.account_info["equity"] / self.account_info["margin"]) * 100 < self.account_info["margin_level"]:
-                print(f'Trade validation failed: Margin level too low. '
-                        f'Current: {(self.account_info["equity"] / self.account_info["margin"]) * 100:.2f}%, '
-                        f'Required: {self.account_info["margin_level"]:.2f}%')
-                
-                return False
-
-            
-        # All validations passed
-        return True
     
     
     def position_close(self, selected_pos: dict) -> bool:
