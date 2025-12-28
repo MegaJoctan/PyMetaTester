@@ -15,6 +15,7 @@ import utils
 import config
 from toolbox_gui import SimToolboxGUI
 from validators import TradeValidators
+from Trade.Trade import CTrade
 
 if config.is_debug:
     np.set_printoptions(
@@ -122,77 +123,96 @@ class Simulator:
             ]
         )
         self.__deals_history_container__ = []
-        
-        self.leverage = int(leverage.split(":")[1])
 
-        self.account_info = {
-            "balance" : deposit,
-            "equity": deposit,
-            "profit": 0,
-            "margin": 0,
-            "free_margin": 0,
-            "margin_level": 0,
-            "leverage": self.leverage
-        }
-        
-        # Position's information
-        
-        self.position_info = {
-            "time": None,
-            "id" : 0,
-            "magic": 0,
-            "symbol": None,
-            "type": None,
-            "volume": 0.0,
-            "open_price": 0.0,
-            "price": 0.0,
-            "sl": 0.0,
-            "tp": 0.0,
-            "commission": 0.0,
-            "margin_required": 0.0,
-            "fee": 0.0,
-            "swap": 0.0,
-            "profit": 0,
-            "comment": 0
-        }
-        
-        # Order's information
-        
-        self.order_info = self.position_info.copy()
-        self.order_info["expiry_date"] = datetime
-        self.order_info["expiration_mode"] = ""
-        
-        # Deal's information
+        # ----------------- AccountInfo -----------------
 
-        self.deal_info = self.position_info.copy()
+        self.AccountInfo = namedtuple(
+            "AccountInfo",
+            [
+                "login",
+                "trade_mode",
+                "leverage",
+                "limit_orders",
+                "margin_so_mode",
+                "trade_allowed",
+                "trade_expert",
+                "margin_mode",
+                "currency_digits",
+                "fifo_close",
+                "balance",
+                "credit",
+                "profit",
+                "equity",
+                "margin",
+                "margin_free",
+                "margin_level",
+                "margin_so_call",
+                "margin_so_so",
+                "margin_initial",
+                "margin_maintenance",
+                "assets",
+                "liabilities",
+                "commission_blocked",
+                "name",
+                "server",
+                "currency",
+                "company",
+            ]
+        )
         
-        self.deal_info["reason"] = None # This is used to store the reason why the trade was closed, e.g. "Take Profit", "Stop Loss", etc.
-        self.deal_info["direction"] = None # The only difference btn an open trade and a closed one is that the closed one has a direction showing if at that instance it was opened or closed in history
-        
-        
-        # Containers for positions, orders, and deals
-                
-        self.positions_container = [] # a list for storing all opened trades
-        self.deals_container = [] # a list for storing all deals 
-        self.orders_container = []
-        
-        # Database for trade history
-        
-        self.sim_folder = "Simulations"
-        
-        os.makedirs(self.sim_folder, exist_ok=True)  # Ensure the simulations path exists
-        
-        # Create the database file name
-        
-        self.history_db_name = os.path.join(self.sim_folder, self.simulator_name+".db")
-        self._create_deals_db(self.history_db_name)
+        mt5_acc_info = mt5_instance.account_info()
 
+        if mt5_acc_info is None:
+            raise RuntimeError("Failed to obtain MT5 account info")
+
+        self.__account_state_update(
+            account_info=self.AccountInfo(
+                # ---- identity / broker-controlled ----
+                login=11223344,
+                trade_mode=mt5_acc_info.trade_mode,
+                leverage=int(leverage.split(":")[1]),
+                limit_orders=mt5_acc_info.limit_orders,
+                margin_so_mode=mt5_acc_info.margin_so_mode,
+                trade_allowed=mt5_acc_info.trade_allowed,
+                trade_expert=mt5_acc_info.trade_expert,
+                margin_mode=mt5_acc_info.margin_mode,
+                currency_digits=mt5_acc_info.currency_digits,
+                fifo_close=mt5_acc_info.fifo_close,
+
+                # ---- simulator-controlled financials ----
+                balance=deposit,                # simulator starting balance
+                credit=mt5_acc_info.credit,
+                profit=0.0,
+                equity=deposit,
+                margin=0.0,
+                margin_free=deposit,
+                margin_level=0.0,
+
+                # ---- risk thresholds (copied from broker) ----
+                margin_so_call=mt5_acc_info.margin_so_call,
+                margin_so_so=mt5_acc_info.margin_so_so,
+                margin_initial=mt5_acc_info.margin_initial,
+                margin_maintenance=mt5_acc_info.margin_maintenance,
+
+                # ---- rarely used but keep parity ----
+                assets=mt5_acc_info.assets,
+                liabilities=mt5_acc_info.liabilities,
+                commission_blocked=mt5_acc_info.commission_blocked,
+
+                # ---- descriptive ----
+                name="John Doe",
+                server="MetaTrader5-Simulator",
+                currency=mt5_acc_info.currency,
+                company=mt5_acc_info.company,
+            )
+        )
+        
         self.toolbox_gui = SimToolboxGUI()  # Initialize the GUI
 
         self.IS_RUNNING = True # is the simulator running or stopped
         self.IS_TESTER = True # are we on the strategy tester mode or live trading 
         
-        self.symbol_info_cache: dict[str, object] = {}
+        self.symbol_info_cache: dict[str, namedtuple] = {}
         self.tick = None
         
     def Start(self, IS_TESTER: bool) -> bool: # simulator start
@@ -201,9 +221,29 @@ class Simulator:
     
     def Stop(self): # simulator stopped
         self.IS_RUNNING = False
-        pass
+        pass #TODO:
     
-    def symbol_info(self, symbol: str) -> dict:    
+    def __account_state_update(self, account_info: namedtuple):
+        
+        self.AccountInfo = account_info
+        
+    def account_info(self) -> namedtuple:
+        
+        """Gets info on the current trading account."""
+        
+        if self.IS_TESTER:
+            return self.AccountInfo
+        
+        mt5_ac_info = self.mt5_instance.account_info()
+        if  mt5_ac_info is None:
+            self.__GetLogger().warning(f"Failed to obtain MT5 account info, MT5 Error = {self.mt5_instance.last_error()}")
+            return
+            
+        return mt5_ac_info
+    
+    def symbol_info(self, symbol: str) -> namedtuple:    
+        
+        """Gets data on the specified financial instrument."""
         
         if symbol not in self.symbol_info_cache:
             info = self.mt5_instance.symbol_info(symbol)
@@ -956,11 +996,11 @@ class Simulator:
             result = self.mt5_instance.order_send(request)
 
             if result is None:
-                print(f"order_send() failed, error: {self.mt5_instance.last_error()}")
+                self.__GetLogger().warning(f"order_send() failed, error: {self.mt5_instance.last_error()}")
                 return None
 
             if result.retcode != self.mt5_instance.TRADE_RETCODE_DONE:
-                print(f"order_send() failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
+                self.__GetLogger().warning(f"order_send() failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
                 return None
         
         # ---------------- Validate a position -------------
@@ -976,7 +1016,7 @@ class Simulator:
                 sl=sl,
                 tp=tp,
                 margin_required=self.account_info["margin_required"],
-                free_margin=self._calculate_margin(symbol=symbol, volume=volume, open_price=price)
+                free_margin=self.order_calc_margin(action=action, symbol=symbol, volume=volume, price=price)
             ):
             return None
         
@@ -1088,159 +1128,186 @@ class Simulator:
             "comment": "Unsupported trade action",
         }
     
-    def _calculate_profit(self, action: str, symbol: str, entry_price: float, exit_price: float, lotsize: float) -> float:
-        
+    def order_calc_profit(self, 
+                        action: int,
+                        symbol: str,
+                        volume: float,
+                        price_open: float,
+                        price_close: float) -> float:
         """
-        Calculate profit based on entry and exit prices, lot size, tick size, and tick value.
+        Return profit in the account currency for a specified trading operation.
         
         Args:
-            action (str): The action taken, either 'buy' or 'sell'.
-            entry_price (float): The price at which the position was opened.
-            exit_price (float): The price at which the position was closed.
-            lotsize (float): The size of the lot in terms of contract units.
+            action (int): The type of position taken, either 0 (buy) or 1 (sell).
+            symbol (str): Financial instrument name. 
+            volume (float):   Trading operation volume.
+            price_open (float): Open Price.
+            price_close (float): Close Price.
         """
 
-        if action != "buy" and action != "sell":
-            print(f"Unknown order type, It can be either 'buy' or 'sell'. Received '{action}' instead.")
+        if action != 0 and action != 1:
+            self.__GetLogger().critical(f"Unknown order type, It can be either 'buy' or 'sell'. Received '{action}' instead.")
             return 0
         
-        order_type = self.mt5_instance.ORDER_TYPE_BUY if action == "buy" else self.mt5_instance.ORDER_TYPE_SELL
+        sym = self.symbol_info_cache[symbol]
         
-        profit = self.mt5_instance.order_calc_profit(
-            order_type,
-            symbol,
-            lotsize,
-            entry_price,
-            exit_price
-        )
+        if self.IS_TESTER:
+            
+            contract_size = sym.contract_size()
+
+            # --- Determine direction ---
+            if action == mt5.ORDER_TYPE_BUY:
+                direction = 1
+            elif action == mt5.ORDER_TYPE_SELL:
+                direction = -1
+            else:
+                self.__GetLogger().critical("order_calc_profit failed: invalid order type")
+                return 0.0
+
+            # --- Core profit calculation ---
+            profit = (
+                (price_close - price_open)
+                * direction
+                * volume
+                * contract_size
+            )
+            
+            # If profit currency != account currency, conversion is needed
+
+            return round(profit, 2)
+            
+        try:
+            profit = self.mt5_instance.order_calc_profit(
+                action,
+                symbol,
+                volume,
+                price_open,
+                price_close
+            )
+        except Exception as e:
+            self.__GetLogger().critical(f"Failed to calculate profit of a position, MT5 error = {self.mt5_instance.last_error()}")
+            return np.nan
         
         return profit
     
-    def monitor_account(self, verbose: bool):
+    def order_calc_margin(
+        self,
+        action: int,
+        symbol: str,
+        volume: float,
+        price: float
+    ) -> float:
+        """
+        Return margin in the account currency to perform a specified trading operation.
+        """
+
+        # Validate inputs 
+        if volume <= 0:
+            self.__GetLogger().error("order_calc_margin failed: volume must be > 0")
+            return 0.0
+
+        if price <= 0:
+            self.__GetLogger().error("order_calc_margin failed: invalid price")
+            return 0.0
+
+        # Validate order type 
+        if action not in (
+            self.mt5_instance.ORDER_TYPE_BUY,
+            self.mt5_instance.ORDER_TYPE_SELL,
+        ):
+            self.__GetLogger().error("order_calc_margin failed: invalid order type")
+            return 0.0
+
+        # Load symbol info 
+        sym = self.symbol_info_cache[symbol]
+
+        if not sym.select():
+            self.__GetLogger().error(f"order_calc_margin failed: symbol {symbol} not found")
+            return 0.0
+
+        contract_size = sym.contract_size()
         
-        """Recalculates all account metrics based on current positions"""
+        account = self.AccountInfo
+        leverage = account.leverage if account.leverage > 0 else 1
+
+        # Core margin calculation (MT5 style) 
+        margin = (contract_size * volume * price) / leverage
+
+        # If margin currency != account currency, conversion needed
+
+        return round(margin, 2)
+    
+    def __account_monitoring(self):
         
-        # 1. Calculate unrealized P/L
-        unrealized_pl = sum(pos['profit'] or 0 for pos in self.positions_container)
+        unrealized_pl = 0
+        total_margin = 0
         
-        self.account_info["profit"] = unrealized_pl
-        
-        # 2. Update Equity (Balance + Floating P/L)
-        self.account_info['equity'] = self.account_info['balance'] + unrealized_pl
-        
-        # 3. Calculate Used Margin
-        self.account_info['margin'] = sum(pos['margin_required'] or 0 for pos in self.positions_container)
-        
-        # 4. Calculate Free Margin (Equity - Used Margin)
-        self.account_info['free_margin'] = self.account_info['equity'] - self.account_info['margin']
-        
-        # 5. Calculate Margin Level (Equity / Margin * 100)
-        self.account_info['margin_level'] = (self.account_info['equity'] / self.account_info['margin']) * 100 \
-            if self.account_info['margin'] > 0 else 0.0
-        
-        if verbose:
+        for pos in self.__positions_container__:
             
-            print(f"Balance: {self.account_info['balance']:.2f} | Equity: {self.account_info['equity']:.2f} | Profit: {self.account_info['profit']:.2f} | Margin: {self.account_info['margin']:.2f} | Free margin: {self.account_info['free_margin']} | Margin level: {self.account_info['margin_level']:.2f}%")
+            unrealized_pl += pos.profit
+            total_margin += self.order_calc_margin(action=pos.type, 
+                                                   symbol=pos.symbol,
+                                                   volume=pos.volume,
+                                                   price=pos.price_open)
+            
+        self.AccountInfo(
+            profit=unrealized_pl,
+            equity=self.AccountInfo.balance + unrealized_pl,
+            margin=total_margin
+        )
+        
+        self.AccountInfo(
+            free_margin=self.AccountInfo.equity - self.AccountInfo.margin,
+            margin_level=self.AccountInfo.equity / self.AccountInfo.margin * 100 if self.AccountInfo.margin > 0 else 0
+        )
         
         
-    def monitor_positions(self, verbose: bool):
+    def __positions_monitoring(self, verbose: bool):
         
         # monitoring all open trades
         
-        for pos in self.positions_container:
-                
-            self.m_symbol.name(pos["symbol"])
-            self.m_symbol.refresh_rates()
-            
-            # Get ticks information for every symbol
-            
-            ask = self.m_symbol.ask()
-            bid = self.m_symbol.bid()
+        for pos in self.__positions_container__:
             
             # update price information on all positions
             
-            pos["price"] = ask if pos["type"] == "buy" else bid
+            price = self.tick.ask if pos.type == 0 else self.tick.bid
             
             # Monitor and calculate the profit of a position
             
-            pos["profit"] = self._calculate_profit(action=pos["type"], symbol=pos["symbol"], lotsize=pos["volume"], entry_price=pos["open_price"], 
-                                                    exit_price=(ask if pos["type"]=="buy" else bid))
-            
+            profit = self.order_calc_profit(action=pos.type,
+                                            symbol=pos.symbol,
+                                            volume=pos.volume,
+                                            price_open=pos.price_open,
+                                            price_close= (self.tick.ask if pos.type==0 else self.tick.bid))
             
             # Monitor the stoploss and takeprofit situation of positions
             
-            if pos["tp"] > 0 and ((pos["type"] == "buy" and bid >= pos["tp"]) or (pos["type"] == "sell" and ask <= pos["tp"])): # Take profit hit    
-    
-                self.position_close(pos_id=pos) # close such position
-                
-            if pos["sl"] > 0 and ((pos["type"] == "buy" and bid <= pos["sl"]) or (pos["type"] == "sell" and ask >= pos["sl"])): # Stop loss hit
-                
-                self.position_close(pos_id=pos) # close such position
-
-
-            # Print the information about all trades (positions and orders (if any))            
+            sl = pos.sl
+            tp = pos.tp
             
-            if verbose:
-                print(f'sim -> ticket | {pos["id"]} | symbol {pos["symbol"]} | time {pos["time"]} | type {pos["type"]} | volume {pos["volume"]} | sl {pos["sl"]} | tp {pos["tp"]} | profit {pos["profit"]:.2f}')
-
-    
-    
-    def position_close(self, selected_pos: dict) -> bool:
-
-        # Update deal info
-        
-        deal_info = selected_pos.copy()
-        deal_info["direction"] = "closed"
-        
-        # check if the reason wa SL or TP according to recent tick/price information
-        
-        self.m_symbol.name(selected_pos["symbol"])
-        self.m_symbol.refresh_rates()
-        
-        ask = self.m_symbol.ask()
-        bid = self.m_symbol.bid()
-        digits = self.m_symbol.digits()
-        
-        deal_info["reason"] = "Unknown" # Unkown deal reason if the stoploss or takeprofit wasn't hit
-        
-        if selected_pos["type"] == "buy":
-            if np.isclose(selected_pos["tp"], bid, digits): # check if the current bid price is almost equal to the takeprofit
-                deal_info["reason"] = "Take profit"           
-                
-            elif np.isclose(selected_pos["sl"], bid, digits): # check if the current bid price is almost equal to the stoploss
-                deal_info["reason"] = "Stop loss"           
-        
-        
-        if selected_pos["type"] == "sell":
-            if np.isclose(selected_pos["tp"], ask, digits): # check if the current ask price is almost equal to the takeprofit
-                deal_info["reason"] = "Take profit"           
-                
-            elif np.isclose(selected_pos["sl"], ask, digits): # check if the current ask price is almost equal to the stoploss
-                deal_info["reason"] = "Stop loss"               
-        
-        
-        self.deals_container.append(deal_info.copy()) # add the deal to the deals container
-        
-        print("Trade closed successfully: ", deal_info)
-        
-        # Save closed deal to database
-        self._save_deal(deal_info, self.history_db_name)
-        
-        # Remove trade from open positions
-        
-        if selected_pos in self.positions_container:
-                
-            # update the account balance
-            self.account_info["balance"] += selected_pos["profit"]
+            if pos.type not in (self.mt5_instance.POSITION_TYPE_BUY, self.mt5_instance.POSITION_TYPE_SELL):
+                self.__GetLogger().critical(f"Unknown order type, It can be either 'buy' or 'sell'. Received '{action}' instead.")
             
-            self.positions_container.remove(selected_pos)
-        else:
-            print(f"Warning: Position with ID {selected_pos['id']} not found!")
-
-        return True
-
+            if pos.tp == 0 and pos.sl == 0:
+                continue
+            
+            if pos.type == self.mt5_instance.POSITION_TYPE_BUY:
+                if price >= pos.tp: # Takeprofit is hit
+                    # self.order_send
+                    pass
+                if price <= pos.sl:
+                    pass
+            elif pos.type == self.mt5_instance.POSITION_TYPE_SELL:
+                if price <= pos.tp: # Takeprofit is hit
+                    # self.order_send
+                    pass
+                if price >= pos.sl:
+                    pass
+            else:
+                self.__GetLogger().warning(f"Unknown order type, It can be either 'buy' or 'sell'.")
+                
     
-    def _calculate_margin(self, symbol: str, volume: float, open_price: float, margin_rate=1.0) -> float:
+    def __calculate_margin(self, symbol: str, volume: float, open_price: float, margin_rate=1.0) -> float:
         
         """
         Calculates margin requirement similar to MetaTrader5 based on the margin mode.
@@ -1297,348 +1364,6 @@ class Simulator:
             margin = (volume * contract_size * open_price) / leverage
 
         return margin
-
-        
-    def _check_stops_level(self, symbol: str, open_price: float, stop_price: float, pos_type: str) -> bool:
-        
-        """Check if stop levels comply with broker requirements"""
-        
-        self.m_symbol.name(symbol)
-        
-        # Validate symbol
-        if not self.m_symbol.select():
-            print(f"Failed to check stop level: Symbol {symbol}. MetaTrader5 error = {self.mt5_instance.last_error()}")
-            return False
-        
-        # Check for stops level 
-        stop_level = self.m_symbol.stops_level()
-        
-        if pos_type == "buy":
-            if stop_price > open_price - stop_level * self.m_symbol.point():
-                print(f"Trade validation failed: Stop level too close. Must be at least {stop_level} points away")
-                return False
-        else:  # sell
-            if stop_price < open_price + stop_level * self.m_symbol.point():
-                print(f"Trade validation failed: Stop level too close. Must be at least {stop_level} points away")
-                return False
-            
-        
-        # Check for freeze level
-        
-        freeze_level = self.m_symbol.freeze_level()
-        
-        if pos_type == "buy":
-            if stop_price > open_price - freeze_level * self.m_symbol.point():
-                print(f"Trade validation failed: Stop level too close. Must be at least {freeze_level} points away")
-                return False
-        else:  # sell
-            if stop_price < open_price + freeze_level * self.m_symbol.point():
-                print(f"Trade validation failed: Stop level too close. Must be at least {freeze_level} points away")
-                return False
-            
-        return True
-
-    def _open_position(self, 
-                       pos_type: str,
-                       volume: float,
-                       symbol: str,
-                       open_price: float,
-                       sl: float = 0.0,
-                       tp: float = 0.0,
-                       comment: str = "", 
-                       magic_number: int=-1) -> bool:
-
-        position_info = self.position_info.copy()
-
-        self.m_symbol.name(symbol)
-        self.m_symbol.refresh_rates() # Get recent ticks information
-
-        if not self._position_validation(volume=volume, symbol=symbol, pos_type=pos_type, open_price=open_price, sl=sl, tp=tp):
-            return False
-
-        self.id += 1  # Increment trade ID
-
-        position_info["time"] = self.m_symbol.time(timezone=pytz.UTC)
-        position_info["id"] = self.id
-        position_info["magic"] = magic_number
-        position_info["symbol"] = symbol
-        position_info["type"] = pos_type
-        position_info["volume"] = volume
-        position_info["open_price"] = open_price
-        position_info["sl"] = sl
-        position_info["tp"] = tp
-        position_info["commission"] = 0.0
-        position_info["fee"] = 0.0
-        position_info["swap"] = 0.0
-        position_info["profit"] = 0.0
-        position_info["comment"] = comment
-        position_info["margin_required"] = self._calculate_margin(symbol=symbol, volume=volume, open_price=open_price)
-
-        # Update account margin
-        self.account_info["margin"] += position_info["margin_required"]
-
-        # Append to open trades
-        self.positions_container.append(position_info)
-        print("Trade opened successfully: ", position_info)
-
-        # Track deal
-        self.deal_info.update(position_info)
-        self.deal_info["direction"] = "opened"
-        self.deal_info["reason"] = "Expert"
-        self.deals_container.append(self.deal_info.copy())
-
-        # Log to database
-        self._save_deal(self.deal_info, self.history_db_name)
-
-        return True
-
-    def buy(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "") -> bool:
-        return self._open_position("buy", volume, symbol, open_price, sl, tp, comment)
-
-    def sell(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "") -> bool:
-        return self._open_position("sell", volume, symbol, open_price, sl, tp, comment)
-    
-    # Position modifications
-    
-    def position_modify(self, pos: dict, new_sl: float, new_tp) -> bool:
-        
-        new_position = pos.copy()
-        
-        if pos["type"] == "buy":
-            if new_sl >= pos["price"]: 
-                print("Failed to modify sl, new_sl >= current price")
-                return False
-        
-        if pos["type"] == "sell":
-            if new_sl <= pos["price"]: 
-                print("Failed to modify sl, new_sl <= current price")
-                return False
-        
-        if not self._check_stops_level(symbol=pos["symbol"], open_price=pos["open_price"], stop_price=new_sl, pos_type=pos["type"]):
-            print("Failed to Modify the Stoploss")
-            
-        if not self._check_stops_level(symbol=pos["symbol"], open_price=pos["open_price"], stop_price=new_tp, pos_type=pos["type"]):
-            print("Failed to Modify the Takeprofit")
-        
-        # new sl and tp values 
-        
-        new_position["sl"] = new_sl
-        new_position["tp"] = new_tp
-        
-        # Update the container
-        
-        for i, p in enumerate(self.positions_container):
-            if p["id"] == pos["id"]:
-                self.positions_container[i] = new_position
-                print(f"Position with id=[{pos['id']}] modified! new_sl={new_sl} new_tp={new_tp}")
-                return True
-
-        print("Failed to modify position: ID not found")
-
-        return True
-    
-    
-    # dealing with pending orders
-    
-    def _place_a_pending_order(self, 
-                               order_type: str,
-                               volume: float,
-                               symbol: str,
-                               open_price: float,
-                               sl: float = 0.0,
-                               tp: float = 0.0,
-                               comment: str = "",
-                               expiry_date: datetime = None,
-                               expiration_mode: str="gtc",
-                               magic_number: int=-1
-                               ):
-        
-        order_types = ["buy limit", "buy stop", "sell limit", "sell stop"]
-        
-        if order_type not in order_types:
-            raise ValueError(f"Invalid pending order type, available order types include: {order_types}")
-        
-        expiration_modes = ["gtc", "daily", "daily_excluding_stops"]
-        if expiration_mode not in expiration_modes:
-            raise ValueError(f"Invalid Expiration mode, available modes include: {expiration_modes}")
-        
-        # Get market info
-        
-        self.m_symbol.name(symbol_name=symbol) # assign symbol's name
-        self.m_symbol.refresh_rates() # get recent ticks from the market using the current selected symbol
-        
-        if order_type in ("buy limit", "buy stop"):
-            
-            if abs(open_price - self.m_symbol.bid()) < self.m_symbol.stops_level() * self.m_symbol.point():
-                print(f"Failed to open a pending order, a '{order_type}' order is too close to the market")
-        
-        if order_type in ("sell limit", "sell stop"):
-            
-            if abs(open_price - self.m_symbol.ask()) < self.m_symbol.stops_level() * self.m_symbol.point():
-                print(f"Failed to open a pending order, a '{order_type}' order is too close to the market")
-        
-        
-        # check if the order has a valid expiry date
-        
-        if expiry_date is not None:
-            if expiry_date <= self.m_symbol.time(timezone=pytz.UTC):
-                print(f"Failed to place a pending order {order_type}, Invalid datetime")
-                return
-        
-        
-        order_info = self.order_info.copy()
-        
-        self.id += 1
-        
-        order_info["id"] = self.id
-        order_info["time"] = self.m_symbol.time(timezone=pytz.UTC)
-        order_info["type"] = order_type
-        order_info["volume"] = volume
-        order_info["symbol"] = symbol
-        order_info["open_price"] = open_price
-        order_info["sl"] = sl
-        order_info["tp"] = tp
-        order_info["comment"] = comment
-        order_info["magic"] = magic_number
-        order_info["margin_required"] = self._calculate_margin(symbol=symbol, volume=volume, open_price=open_price)
-        
-        order_info["expiry_date"] = expiry_date
-        order_info["expiration_mode"] = expiration_mode
-        
-        self.orders_container.append(order_info) # add a valid order to it's container
-        
-        
-    def buy_stop(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "", expiry_date: datetime = None,expiration_mode: str="gtc"):
-        
-        # validate an order according to it's type
-        
-        self.m_symbol.name(symbol_name=symbol)
-        self.m_symbol.refresh_rates()
-        
-        if self.m_symbol.bid() >= open_price:
-            print("Failed to place a buy stop order, open price <= the bid price")    
-            return
-        
-        self._place_a_pending_order("buy stop", volume, symbol, open_price, sl, tp, comment, expiry_date, expiration_mode)    
-
-    def buy_limit(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "", expiry_date: datetime = None, expiration_mode: str="gtc"):
-        
-        self.m_symbol.name(symbol_name=symbol)
-        self.m_symbol.refresh_rates()
-        
-        if self.m_symbol.bid() <= open_price:
-            print("Failed to place a buy limit order, open price >= current bid price")
-            return
-
-        self._place_a_pending_order("buy limit", volume, symbol, open_price, sl, tp, comment, expiry_date, expiration_mode)
-
-    def sell_stop(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "", expiry_date: datetime = None, expiration_mode: str="gtc"):
-        
-        self.m_symbol.name(symbol_name=symbol)
-        self.m_symbol.refresh_rates()
-
-        if self.m_symbol.ask() <= open_price:
-            print("Failed to place a sell stop order, open price >= current ask price")
-            return
-
-        self._place_a_pending_order("sell stop", volume, symbol, open_price, sl, tp, comment, expiry_date, expiration_mode)
-
-    def sell_limit(self, volume: float, symbol: str, open_price: float, sl: float = 0.0, tp: float = 0.0, comment: str = "", expiry_date: datetime = None, expiration_mode: str="gtc"):
-        
-        self.m_symbol.name(symbol_name=symbol)
-        self.m_symbol.refresh_rates()
-
-        if self.m_symbol.ask() >= open_price:
-            print("Failed to place a sell limit order, open price <= current ask price")
-            return
-
-        self._place_a_pending_order("sell limit", volume, symbol, open_price, sl, tp, comment, expiry_date, expiration_mode)
-                
-                
-    def order_modify(self, order: dict, new_open_price: float, new_sl: float, new_tp: float, new_expiry: datetime = None, new_expiration_mode: str = None):
-        """
-        Modify an existing pending order's open price, SL/TP, and optionally its expiration settings.
-        """
-        new_order = order.copy()
-
-        # Validate order type
-        valid_types = ["buy limit", "buy stop", "sell limit", "sell stop"]
-        if order["type"] not in valid_types:
-            print(f"Invalid order type for modification: {order['type']}")
-            return False
-
-        self.m_symbol.name(order["symbol"])
-        self.m_symbol.refresh_rates()
-
-        # Ensure open price is placed logically according to type
-        ask = self.m_symbol.ask()
-        bid = self.m_symbol.bid()
-
-        if order["type"] == "buy stop" and bid >= new_open_price:
-            print("Failed to modify Buy Stop: new open price <= current bid price")
-            return False
-        if order["type"] == "buy limit" and bid <= new_open_price:
-            print("Failed to modify Buy Limit: new open price >= current bid price")
-            return False
-        if order["type"] == "sell stop" and ask <= new_open_price:
-            print("Failed to modify Sell Stop: new open price >= current ask price")
-            return False
-        if order["type"] == "sell limit" and ask >= new_open_price:
-            print("Failed to modify Sell Limit: new open price <= current ask price")
-            return False
-
-        
-        # ensure the order ins't close to the market
-        
-        order_type = order["type"]
-        if order_type in ("buy limit", "buy stop"):
-            
-            if abs(new_open_price - self.m_symbol.bid()) < self.m_symbol.stops_level() * self.m_symbol.point():
-                print(f"Failed to open a pending order, a '{order_type}' order is too close to the market")
-                return False
-        
-        if order_type in ("sell limit", "sell stop"):
-            
-            if abs(new_open_price - self.m_symbol.ask()) < self.m_symbol.stops_level() * self.m_symbol.point():
-                print(f"Failed to open a pending order, a '{order_type}' order is too close to the market")
-                return False
-        
-        if new_expiry and new_expiry <= self.m_symbol.time(timezone=pytz.UTC):
-            print("Invalid Expiry date, new expiry date must be a value in the future")
-        
-        # Update order values
-        new_order["open_price"] = new_open_price
-        new_order["sl"] = new_sl
-        new_order["tp"] = new_tp
-
-        if new_expiry:
-            new_order["expiry_date"] = new_expiry
-        if new_expiration_mode:
-            new_order["expiration_mode"] = new_expiration_mode
-
-        # Update the order in the container
-        for i, o in enumerate(self.orders_container):
-            if o["id"] == order["id"]:
-                self.orders_container[i] = new_order
-                print(f"Order with id=[{order['id']}] modified successfully.")
-                return True
-
-        print("Failed to modify order: ID not found")
-        return False
-
-
-    def order_delete(self, selected_order: dict) -> bool:
-        
-        # delete a pending order from the orders container
-        
-        if selected_order in self.orders_container:
-            
-            self.orders_container.remove(selected_order)
-            return True
-        
-        else:
-            print(f"Warning: An Order with ID {selected_order['id']} not found!")
-            return False
 
     def monitor_pending_orders(self):
         
