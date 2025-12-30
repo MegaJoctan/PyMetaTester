@@ -213,14 +213,15 @@ class Simulator:
         self.IS_TESTER = True # are we on the strategy tester mode or live trading 
         
         self.symbol_info_cache: dict[str, namedtuple] = {}
-        self.tick = None
+        self.tick_cache: dict[str, namedtuple] = {}
         
     def Start(self, IS_TESTER: bool) -> bool: # simulator start
         
         self.IS_TESTER = IS_TESTER
     
     def Stop(self): # simulator stopped
-        self.IS_RUNNING = False
+        
+        self.IS_RUNNING  = False
         pass #TODO:
     
     def __account_state_update(self, account_info: namedtuple):
@@ -254,6 +255,21 @@ class Simulator:
         
         return self.symbol_info_cache[symbol]
 
+    def symbol_info_tick(self, symbol: str) -> namedtuple:
+        
+        if self.IS_TESTER:
+            return self.tick_cache[symbol] 
+        
+        try:
+            tick = self.mt5_instance.symbol_info_tick(symbol)
+        except Exception as e:
+            self.__GetLogger().warning(f"Failed. MT5 Error = {self.mt5_instance.last_error()}")
+            
+        return tick
+    
+    def TickUpdate(self, symbol: str, tick: namedtuple):
+        self.tick_cache[symbol] = tick
+    
     def __mt5_data_to_dicts(self, rates) -> list[dict]:
         
         if rates is None or len(rates) == 0:
@@ -329,9 +345,6 @@ class Simulator:
             
         return rates
     
-    def TickUpdate(self, tick: dict):
-        self.tick = tick
-    
     def __GetLogger(self):
         if self.IS_TESTER:
             return config.tester_logger
@@ -353,11 +366,13 @@ class Simulator:
             Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Returns None in case of an error. The info on the error can be obtained using last_error().
         """
         
-        if self.tick is None or self.tick.time is None:
+        tick = self.tick_cache[symbol]
+        
+        if tick is None or tick.time is None:
             self.__GetLogger().critical("Time information not found in the ticker, call the function 'TickUpdate' giving it the latest tick information")
             now = datetime.now(tz=timezone.utc)
         else:
-            now = self.tick.time
+            now = tick.time
         
         if self.IS_TESTER:    
             rates = self.copy_rates_from(symbol=symbol, 
@@ -996,27 +1011,27 @@ class Simulator:
             result = self.mt5_instance.order_send(request)
 
             if result is None:
-                self.__GetLogger().warning(f"order_send() failed, error: {self.mt5_instance.last_error()}")
+                self.__GetLogger().warning(f"Failed, MT5 error: {self.mt5_instance.last_error()}")
                 return None
 
             if result.retcode != self.mt5_instance.TRADE_RETCODE_DONE:
-                self.__GetLogger().warning(f"order_send() failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
+                self.__GetLogger().warning(f"Failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
                 return None
         
         # ---------------- Validate a position -------------
         
         validators = TradeValidators(symbol_info=self.symbol_info(symbol),
-                                     ticks_info=self.tick,
+                                     ticks_info=self.tick_cache[symbol],
                                      logger=self.__GetLogger())
         
         if not validators.all_validators(
-                symbol=symbol,
                 lotsize=volume,
+                pos_type=action,
                 entry=price,
                 sl=sl,
                 tp=tp,
-                margin_required=self.account_info["margin_required"],
-                free_margin=self.order_calc_margin(action=action, symbol=symbol, volume=volume, price=price)
+                margin_required=self.order_calc_margin(action=action, symbol=symbol, volume=volume, price=price),
+                free_margin=self.AccountInfo.margin_free
             ):
             return None
         
@@ -1144,37 +1159,110 @@ class Simulator:
             price_open (float): Open Price.
             price_close (float): Close Price.
         """
-
-        if action != 0 and action != 1:
-            self.__GetLogger().critical(f"Unknown order type, It can be either 'buy' or 'sell'. Received '{action}' instead.")
-            return 0
         
-        sym = self.symbol_info_cache[symbol]
+        sym = self.symbol_info(symbol)
         
         if self.IS_TESTER:
             
-            contract_size = sym.contract_size()
+            contract_size = sym.trade_contract_size
+            
+            BUY_ACTIONS = {
+                self.mt5_instance.ORDER_TYPE_BUY,
+                self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
+                self.mt5_instance.ORDER_TYPE_BUY_STOP,
+                self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
+            }
 
+            SELL_ACTIONS = {
+                self.mt5_instance.ORDER_TYPE_SELL,
+                self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
+                self.mt5_instance.ORDER_TYPE_SELL_STOP,
+                self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
+            }
             # --- Determine direction ---
-            if action == mt5.ORDER_TYPE_BUY:
+            if action in BUY_ACTIONS: #TODO: 
                 direction = 1
-            elif action == mt5.ORDER_TYPE_SELL:
+            elif action in SELL_ACTIONS:
                 direction = -1
-            else:
-                self.__GetLogger().critical("order_calc_profit failed: invalid order type")
-                return 0.0
 
             # --- Core profit calculation ---
-            profit = (
-                (price_close - price_open)
-                * direction
-                * volume
-                * contract_size
-            )
-            
-            # If profit currency != account currency, conversion is needed
 
-            return round(profit, 2)
+            calc_mode = sym.trade_calc_mode
+            price_delta = (price_close - price_open) * direction
+
+            try:
+                # ------------------ FOREX / CFD / STOCKS -----------------------
+                if calc_mode in (
+                    self.mt5_instance.SYMBOL_CALC_MODE_FOREX,
+                    self.mt5_instance.SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE,
+                    self.mt5_instance.SYMBOL_CALC_MODE_CFD,
+                    self.mt5_instance.SYMBOL_CALC_MODE_CFDINDEX,
+                    self.mt5_instance.SYMBOL_CALC_MODE_CFDLEVERAGE,
+                    self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS,
+                    self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS_MOEX,
+                ):
+                    profit = price_delta * contract_size * volume
+
+                # ---------------- FUTURES --------------------
+                elif calc_mode in (
+                    self.mt5_instance.SYMBOL_CALC_MODE_FUTURES,
+                    self.mt5_instance.SYMBOL_CALC_MODE_EXCH_FUTURES,
+                    # self.mt5_instance.SYMBOL_CALC_MODE_EXCH_FUTURES_FORTS,
+                ):
+                    tick_value = sym.trade_tick_value
+                    tick_size = sym.trade_tick_size
+
+                    if tick_size <= 0:
+                        self.__GetLogger().critical("Invalid tick size")
+                        return 0.0
+
+                    profit = price_delta * volume * (tick_value / tick_size)
+
+                # ---------- BONDS -------------------
+                
+                elif calc_mode in (
+                    self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS,
+                    self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS_MOEX,
+                ):
+                    face_value = sym.trade_face_value
+                    accrued_interest = sym.trade_accrued_interest
+
+                    profit = (
+                        volume
+                        * contract_size
+                        * (price_close * face_value + accrued_interest)
+                        - volume
+                        * contract_size
+                        * (price_open * face_value)
+                    )
+
+                # ------ COLLATERAL -------
+                elif calc_mode == self.mt5_instance.SYMBOL_CALC_MODE_SERV_COLLATERAL:
+                    liquidity_rate = sym.trade_liquidity_rate
+                    market_price = (
+                        self.tick_cache[symbol].ask if action == self.mt5_instance.ORDER_TYPE_BUY else self.tick_cache[symbol].bid
+                    )
+
+                    profit = (
+                        volume
+                        * contract_size
+                        * market_price
+                        * liquidity_rate
+                    )
+
+                else:
+                    self.__GetLogger().critical(
+                        f"Unsupported trade calc mode: {calc_mode}"
+                    )
+                    return 0.0
+
+                return round(profit, 2)
+                
+            except Exception as e:
+                self.__GetLogger().critical(f"Failed: {e}")
+                return 0.0
+            
+        # if we are not on the strategy tester
             
         try:
             profit = self.mt5_instance.order_calc_profit(
@@ -1184,59 +1272,93 @@ class Simulator:
                 price_open,
                 price_close
             )
+        
         except Exception as e:
             self.__GetLogger().critical(f"Failed to calculate profit of a position, MT5 error = {self.mt5_instance.last_error()}")
             return np.nan
         
         return profit
     
-    def order_calc_margin(
-        self,
-        action: int,
-        symbol: str,
-        volume: float,
-        price: float
-    ) -> float:
+    def order_calc_margin(self, action: int, symbol: str, volume: float, price: float) -> float:
         """
         Return margin in the account currency to perform a specified trading operation.
+        
         """
 
-        # Validate inputs 
-        if volume <= 0:
-            self.__GetLogger().error("order_calc_margin failed: volume must be > 0")
+        if volume <= 0 or price <= 0:
+            self.__GetLogger().error("order_calc_margin failed: invalid volume or price")
             return 0.0
 
-        if price <= 0:
-            self.__GetLogger().error("order_calc_margin failed: invalid price")
-            return 0.0
+        if not self.IS_TESTER:
+            try:
+                return round(self.mt5_instance.order_calc_margin(action, symbol, volume, price), 2)
+            except Exception:
+                self.__GetLogger().warning(f"Failed: MT5 Error = {self.mt5_instance.last_error()}")
+                return 0.0
 
-        # Validate order type 
-        if action not in (
-            self.mt5_instance.ORDER_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_SELL,
-        ):
-            self.__GetLogger().error("order_calc_margin failed: invalid order type")
-            return 0.0
+        # IS_TESTER = True
+        sym = self.symbol_info(symbol)
 
-        # Load symbol info 
-        sym = self.symbol_info_cache[symbol]
+        contract_size = sym.trade_contract_size
+        leverage = max(self.AccountInfo.leverage, 1)
 
-        if not sym.select():
-            self.__GetLogger().error(f"order_calc_margin failed: symbol {symbol} not found")
-            return 0.0
-
-        contract_size = sym.contract_size()
+        margin_rate = (
+            sym.margin_initial
+            if sym.margin_initial > 0
+            else sym.margin_maintenance
+        )
         
-        account = self.AccountInfo
-        leverage = account.leverage if account.leverage > 0 else 1
+        if margin_rate <= 0: # if margin rate is zero set it to 1
+            margin_rate = 1.0
 
-        # Core margin calculation (MT5 style) 
-        margin = (contract_size * volume * price) / leverage
+        mode = sym.trade_calc_mode
 
-        # If margin currency != account currency, conversion needed
+        if mode == self.mt5_instance.SYMBOL_CALC_MODE_FOREX:
+            margin = (volume * contract_size * price) / leverage
+
+        elif mode == self.mt5_instance.SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
+            margin = volume * contract_size * price
+
+        elif mode in (
+            self.mt5_instance.SYMBOL_CALC_MODE_CFD,
+            self.mt5_instance.SYMBOL_CALC_MODE_CFDINDEX,
+            self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS,
+            self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS_MOEX,
+        ):
+            margin = volume * contract_size * price * margin_rate
+
+        elif mode == self.mt5_instance.SYMBOL_CALC_MODE_CFDLEVERAGE:
+            margin = (volume * contract_size * price * margin_rate) / leverage
+
+        elif mode in (
+            self.mt5_instance.SYMBOL_CALC_MODE_FUTURES,
+            self.mt5_instance.SYMBOL_CALC_MODE_EXCH_FUTURES,
+            # self.mt5_instance.SYMBOL_CALC_MODE_EXCH_FUTURES_FORTS,
+        ):
+            margin = volume * sym.margin_initial
+
+        elif mode in (
+            self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS,
+            self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS_MOEX,
+        ):
+            margin = (
+                volume
+                * contract_size
+                * sym.trade_face_value
+                * price
+                / 100
+            )
+
+        elif mode == self.mt5_instance.SYMBOL_CALC_MODE_SERV_COLLATERAL:
+            margin = 0.0
+
+        else:
+            self.__GetLogger().warning(f"Unknown calc mode {mode}, fallback margin formula used")
+            margin = (volume * contract_size * price) / leverage
 
         return round(margin, 2)
-    
+
+        
     def __account_monitoring(self):
         
         unrealized_pl = 0
@@ -1248,7 +1370,7 @@ class Simulator:
             total_margin += self.order_calc_margin(action=pos.type, 
                                                    symbol=pos.symbol,
                                                    volume=pos.volume,
-                                                   price=pos.price_open)
+                                                   price=pos.price)
             
         self.AccountInfo(
             profit=unrealized_pl,
@@ -1257,7 +1379,7 @@ class Simulator:
         )
         
         self.AccountInfo(
-            free_margin=self.AccountInfo.equity - self.AccountInfo.margin,
+            margin_free=self.AccountInfo.equity - self.AccountInfo.margin,
             margin_level=self.AccountInfo.equity / self.AccountInfo.margin * 100 if self.AccountInfo.margin > 0 else 0
         )
         
@@ -1270,7 +1392,8 @@ class Simulator:
             
             # update price information on all positions
             
-            price = self.tick.ask if pos.type == 0 else self.tick.bid
+            tick = self.tick_cache[pos.symbol]
+            price = tick.ask if pos.type == 0 else tick.bid
             
             # Monitor and calculate the profit of a position
             
@@ -1278,15 +1401,9 @@ class Simulator:
                                             symbol=pos.symbol,
                                             volume=pos.volume,
                                             price_open=pos.price_open,
-                                            price_close= (self.tick.ask if pos.type==0 else self.tick.bid))
+                                            price_close= (tick.ask if pos.type==0 else tick.bid))
             
             # Monitor the stoploss and takeprofit situation of positions
-            
-            sl = pos.sl
-            tp = pos.tp
-            
-            if pos.type not in (self.mt5_instance.POSITION_TYPE_BUY, self.mt5_instance.POSITION_TYPE_SELL):
-                self.__GetLogger().critical(f"Unknown order type, It can be either 'buy' or 'sell'. Received '{action}' instead.")
             
             if pos.tp == 0 and pos.sl == 0:
                 continue
@@ -1318,7 +1435,7 @@ class Simulator:
             print(f"Margin calculation failed: MetaTrader5 error = {self.mt5_instance.last_error()}")
             return 0.0
 
-        contract_size = self.m_symbol.contract_size()
+        contract_size = self.m_symbol.trade_contract_size()
         leverage = self.leverage
         margin_mode = self.m_symbol.trade_calc_mode()
 
