@@ -32,7 +32,7 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
         return logger  # already configured
 
     formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)20s %(lineno)s --> %(message)s"
+        "%(asctime)s | %(levelname)-8s | %(name)s | [%(filename)s:%(lineno)s - %(funcName)10s() ] => %(message)s"
     )
 
     file_handler = RotatingFileHandler(
