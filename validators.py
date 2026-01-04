@@ -29,6 +29,18 @@ class TradeValidators:
             self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
         }
         
+        self.ORDER_TYPES_MAP = {
+            self.mt5_instance.ORDER_TYPE_BUY: "Market Buy order",
+            self.mt5_instance.ORDER_TYPE_SELL : "Market Sell order",
+            self.mt5_instance.ORDER_TYPE_BUY_LIMIT : "Buy Limit pending order",
+            self.mt5_instance.ORDER_TYPE_SELL_LIMIT : "Sell Limit pending order",
+            self.mt5_instance.ORDER_TYPE_BUY_STOP : "Buy Stop pending order",
+            self.mt5_instance.ORDER_TYPE_SELL_STOP : "Sell Stop pending order",
+            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT: "Buy Stop Limit pending order",
+            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT: "Sell Stop Limit pending order",
+            self.mt5_instance.ORDER_TYPE_CLOSE_BY: "Order to close a position by an opposite one"
+        }
+        
     def is_valid_lotsize(self, lotsize: float) -> bool:
         
         # Validate lotsize
@@ -52,7 +64,6 @@ class TradeValidators:
     def is_valid_freeze_level(self, entry: float, stop_price: float, order_type: int) -> bool:
         """
         Check SYMBOL_TRADE_FREEZE_LEVEL for pending orders and open positions.
-        Logs detailed reasons when modification is not allowed.
         """
 
         freeze_level = self.symbol_info.trade_freeze_level
@@ -142,35 +153,30 @@ class TradeValidators:
         self.logger.error("Unknown MetaTrader 5 order type")
         return False
     
-    def is_valid_stops_level(self, entry: float, stop_price: float, order_type: int) -> bool:
-        
-        point = self.symbol_info.point
-        stop_level   = self.symbol_info.trade_stops_level * point
-        
-        if order_type in self.BUY_ACTIONS:  # BUY
-            if stop_price > entry - stop_level:
-                self.logger.info(f"Either SL or TP is too close to the market for a Buy-based order. Min allowed distance = {stop_level}")
-                return False
-
-        if order_type in self.SELL_ACTIONS:  # SELL
-            if stop_price < entry + stop_level:
-                self.logger.info(f"Either SL or TP is too close to the market for a Sell-based order. Min allowed distance = {stop_level}")
-                return False
-        else:
-            self.logger.error("Unknown MetaTrader 5 order type")
-            return False
-
-        return True
-    
     def is_max_orders_reached(self, open_orders: int, ac_limit_orders: int) -> bool:
+        """Checks whether the maximum number of orders for the account is reached
+
+        Args:
+            open_orders (int): The number of opened orders
+            ac_limit_orders (int): Maximum number of orders allowed for the account
+
+        Returns:
+            bool: True if the threshold is reached, otherwise, it returns false.
+        """
         
-        if open_orders >= ac_limit_orders:
+        if open_orders >= ac_limit_orders and ac_limit_orders > 0:
             self.logger.critical(f"Pending Orders limit of {ac_limit_orders} is reached!")
             return True
         
         return False
     
     def is_symbol_volume_reached(self, symbol_volume: float, volume_limit: float) -> bool:
+        
+        """Checks if the maximum allowed volume is reached for a particular instrument
+
+        Returns:
+            bool: True if the condition is reached and False when it is not.
+        """
     
         if symbol_volume >= volume_limit and volume_limit > 0:
             self.logger.critical(f"Symbol Volume limit of {volume_limit} is reached!")
@@ -178,9 +184,25 @@ class TradeValidators:
         
         return False
     
+    def is_valid_stops_level(self, entry: float, stop_price: float, stops_type: str='') -> bool:
+        
+        point = self.symbol_info.point
+        stop_level   = self.symbol_info.trade_stops_level * point
+        
+        distance = abs(entry-stop_price)
+        
+        if stop_price <= 0:
+            return True
+        
+        if distance < stop_level:
+            self.logger.info(f"{'Either SL or TP' if stops_type=='' else stops_type} is too close to the market. Min allowed distance = {stop_level}")
+            return False
+        
+        return True
+    
     def is_valid_sl(self, entry: float, sl: float, order_type: int) -> bool:
         
-        if not self.is_valid_stops_level(entry, sl, order_type): # check for stops and freeze levels
+        if not self.is_valid_stops_level(entry, sl, "Stoploss"): # check for stops and freeze levels
             return False
             
         if sl > 0:
@@ -204,20 +226,21 @@ class TradeValidators:
 
     def is_valid_tp(self, entry: float, tp: float, order_type: int) -> bool:
         
-        if not self.is_valid_stops_level(entry, tp, order_type): # check for stops and freeze levels
+        if not self.is_valid_stops_level(entry, tp, "Takeprofit"): # check for stops and freeze levels
             return False
         
-        if order_type in self.BUY_ACTIONS: # buy position
-            if tp <= entry:
-                self.logger.info(f"Trade validation failed: Buy-based order's take profit ({tp}) must be above order opening price ({entry})")
+        if tp > 0:
+            if order_type in self.BUY_ACTIONS: # buy position
+                if tp <= entry:
+                    self.logger.info(f"Trade validation failed: {self.ORDER_TYPES_MAP[order_type]} take profit ({tp}) must be above order opening price ({entry})")
+                    return False
+            elif order_type in self.SELL_ACTIONS: # sell position
+                if tp >= entry:
+                    self.logger.info(f"Trade validation failed: {self.ORDER_TYPES_MAP[order_type]} take profit ({tp}) must be below order opening price ({entry})")
+                    return False
+            else:
+                self.logger.error("Unknown MetaTrader 5 order type")
                 return False
-        elif order_type in self.SELL_ACTIONS: # sell position
-            if tp >= entry:
-                self.logger.info(f"Trade validation failed: Sell-based order's take profit ({tp}) must be below order opening price ({entry})")
-                return False
-        else:
-            self.logger.error("Unknown MetaTrader 5 order type")
-            return False
         
         return True
     
@@ -259,38 +282,3 @@ class TradeValidators:
 
         return True
     
-    def all_validators(
-        self,
-        lotsize: float,
-        entry: float,
-        sl: float,
-        tp: float,
-        order_type: int,
-        margin_required: float,
-        free_margin: float,
-    ) -> bool:
-        """
-        Run all trade validations.
-
-        Returns:
-            bool: True if all checks pass, otherwise False.
-        """
-
-        validators = [
-            lambda: self.is_valid_lotsize(lotsize),
-            lambda: self.is_valid_entry(entry, order_type),
-            lambda: True if order_type not in (self.mt5_instance.ORDER_TYPE_BUY, self.mt5_instance.ORDER_TYPE_SELL) else self.is_there_enough_money(margin_required, free_margin), # We don't validate this for pending orders
-        ]
-
-        # SL / TP are optional in MT5
-        if sl > 0:
-            validators.append(lambda: self.is_valid_sl(entry, sl, order_type))
-
-        if tp > 0:
-            validators.append(lambda: self.is_valid_tp(entry, tp, order_type))
-
-        for validate in validators:
-            if not validate():
-                return False
-
-        return True
