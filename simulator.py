@@ -224,6 +224,22 @@ class Simulator:
             self.mt5_instance.ORDER_TYPE_CLOSE_BY
             ]
         
+        self.BUY_ACTIONS = {
+            # self.mt5_instance.POSITION_TYPE_BUY,
+            self.mt5_instance.ORDER_TYPE_BUY,
+            self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
+            self.mt5_instance.ORDER_TYPE_BUY_STOP,
+            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
+        }
+
+        self.SELL_ACTIONS = {
+            # self.mt5_instance.POSITION_TYPE_SELL,
+            self.mt5_instance.ORDER_TYPE_SELL,
+            self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
+            self.mt5_instance.ORDER_TYPE_SELL_STOP,
+            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
+        }
+        
     def Start(self, IS_TESTER: bool) -> bool: # simulator start
         
         self.IS_TESTER = IS_TESTER
@@ -1578,161 +1594,151 @@ class Simulator:
             margin_free=self.AccountInfo.equity - self.AccountInfo.margin,
             margin_level=self.AccountInfo.equity / self.AccountInfo.margin * 100 if self.AccountInfo.margin > 0 else 0
         )
-        
-        
-    def __positions_monitoring(self, verbose: bool):
-        
-        # monitoring all open trades
-        
-        for pos in self.__positions_container__:
-            
-            # update price information on all positions
-            
-            tick = self.tick_cache[pos.symbol]
-            price = tick.ask if pos.type == 0 else tick.bid
-            
-            # Monitor and calculate the profit of a position
-            
-            profit = self.order_calc_profit(order_type=pos.type,
-                                            symbol=pos.symbol,
-                                            volume=pos.volume,
-                                            price_open=pos.price_open,
-                                            price_close= (tick.ask if pos.type==0 else tick.bid))
-            
-            # Monitor the stoploss and takeprofit situation of positions
-            
-            if pos.tp == 0 and pos.sl == 0:
-                continue
-            
-            if pos.type == self.mt5_instance.POSITION_TYPE_BUY:
-                if price >= pos.tp: # Takeprofit is hit
-                    # self.order_send
-                    pass
-                if price <= pos.sl:
-                    pass
-            elif pos.type == self.mt5_instance.POSITION_TYPE_SELL:
-                if price <= pos.tp: # Takeprofit is hit
-                    # self.order_send
-                    pass
-                if price >= pos.sl:
-                    pass
-            else:
-                self.__GetLogger().warning(f"Unknown order type, It can be either 'buy' or 'sell'.")
-                
     
-    def __calculate_margin(self, symbol: str, volume: float, open_price: float, margin_rate=1.0) -> float:
-        
+    def __positions_monitoring(self):
         """
-        Calculates margin requirement similar to MetaTrader5 based on the margin mode.
+        Monitors all open positions:
+        - updates profit
+        - checks SL / TP
+        - closes positions when hit
         """
-        self.m_symbol.name(symbol)
 
-        if not self.m_symbol.select():
-            print(f"Margin calculation failed: MetaTrader5 error = {self.mt5_instance.last_error()}")
-            return 0.0
+        for pos in list(self.__positions_container__):
 
-        contract_size = self.m_symbol.trade_contract_size()
-        leverage = self.leverage
-        margin_mode = self.m_symbol.trade_calc_mode()
+            tick = self.tick_cache[pos.symbol]
 
-        print("Margin calculation mode: ",self.m_symbol.trade_calc_mode_description())
-        
-        tick_size = self.m_symbol.tick_size() or 0.0001
-        tick_value = self.m_symbol.tick_value() or 0.0
-        initial_margin = self.m_symbol.margin_initial() or 0.0
-        face_value = self.m_symbol.trade_face_value() 
-        
-            
-        if margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_FOREX:
-            margin = (volume * contract_size * margin_rate) / leverage
-
-        elif margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE:
-            margin = volume * contract_size * margin_rate
-
-        elif margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_CFD:
-            margin = volume * contract_size * open_price * margin_rate
-
-        elif margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_CFDLEVERAGE:
-            margin = (volume * contract_size * open_price * margin_rate) / leverage
-
-        elif margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_CFDINDEX:
-            margin = volume * contract_size * open_price * tick_value / tick_size * margin_rate
-
-        elif margin_mode in [self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS, self.mt5_instance.SYMBOL_CALC_MODE_EXCH_STOCKS_MOEX]:
-            margin = volume * contract_size * open_price * margin_rate
-
-        elif margin_mode in [self.mt5_instance.SYMBOL_CALC_MODE_FUTURES, 
-                             self.mt5_instance.SYMBOL_CALC_MODE_EXCH_FUTURES]:
-            
-            margin = volume * initial_margin * margin_rate
-
-        elif margin_mode in [self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS, self.mt5_instance.SYMBOL_CALC_MODE_EXCH_BONDS_MOEX]:
-            margin = volume * contract_size * face_value * open_price / 100
-
-        elif margin_mode == self.mt5_instance.SYMBOL_CALC_MODE_SERV_COLLATERAL:
-            margin = 0.0
-
-        else:
-            print(f"Unknown margin mode: {margin_mode}, falling back to default margin calc.")
-            margin = (volume * contract_size * open_price) / leverage
-
-        return margin
-
-    def monitor_pending_orders(self):
-        
-        now = datetime.now(tz=pytz.UTC)
-        
-        expired_orders = []
-        triggered_orders = []
-
-        for order in self.orders_container: # loop through all orders
-            
-            expiration_mode = order.get("expiration_mode", "gtc")
-            expiry_date = order.get("expiry_date")
-
-            # Check for expiration based on mode
-            if expiration_mode == "daily" or expiration_mode == "daily_excluding_stops":
-                if expiry_date and now >= expiry_date:
-                    
-                    expired_orders.append(order)
-                    continue  # Skip to next order
-
-            self.m_symbol.name(symbol_name=order["symbol"])
-            
-            if not self.m_symbol.refresh_rates():
+            # --- Determine close price and opposite order type ---
+            if pos.type == self.mt5_instance.POSITION_TYPE_BUY:
+                price = tick.bid
+                close_type = self.mt5_instance.ORDER_TYPE_SELL
+            elif pos.type == self.mt5_instance.POSITION_TYPE_SELL:
+                price = tick.ask
+                close_type = self.mt5_instance.ORDER_TYPE_BUY
+            else:
+                self.__GetLogger().warning("Unknown position type")
                 continue
 
-            ask = self.m_symbol.ask()
-            bid = self.m_symbol.bid()
-            open_price = order["open_price"]
-            order_type = order["type"].lower()
-            
-            if order_type in ("buy limit", "buy stop"):
-                order["price"] = self.m_symbol.ask()
+            # --- Update floating profit ---
+            pos.profit = self.order_calc_profit(
+                order_type=pos.type,
+                symbol=pos.symbol,
+                volume=pos.volume,
+                price_open=pos.price_open,
+                price_close=price
+            )
 
-            if order_type in ("sell limit", "sell stop"):
-                order["price"] = self.m_symbol.bid()
-                
-            triggered = False # store the triggered condition of an order
-            
-            if order_type == "buy limit" and ask <= open_price:
-                triggered = self.buy(order["volume"], order["symbol"], ask, order["sl"], order["tp"], order["comment"]) # open a buy position with credentials taken from an order
+            # --- Check SL / TP ---
+            hit_tp = False
+            hit_sl = False
 
-            elif order_type == "buy stop" and ask >= open_price:
-                triggered = self.buy(order["volume"], order["symbol"], ask, order["sl"], order["tp"], order["comment"]) # open a buy position
+            if pos.tp > 0:
+                hit_tp = (
+                    price >= pos.tp if pos.type == self.mt5_instance.POSITION_TYPE_BUY
+                    else price <= pos.tp
+                )
 
-            elif order_type == "sell limit" and bid >= open_price:
-                triggered = self.sell(order["volume"], order["symbol"], bid, order["sl"], order["tp"], order["comment"]) # open a sell position
+            if pos.sl > 0:
+                hit_sl = (
+                    price <= pos.sl if pos.type == self.mt5_instance.POSITION_TYPE_BUY
+                    else price >= pos.sl
+                )
 
-            elif order_type == "sell stop" and bid <= open_price:
-                triggered = self.sell(order["volume"], order["symbol"], bid, order["sl"], order["tp"], order["comment"]) # open a sell position
+            if not (hit_tp or hit_sl):
+                continue
 
-            if triggered:
-                triggered_orders.append(order) # add a triggerd order to the list 
+            # --- Close position ---
+            request = {
+                "action": self.mt5_instance.TRADE_ACTION_DEAL,
+                "type": close_type,
+                "symbol": pos.symbol,
+                "price": price,
+                "volume": pos.volume,
+                "position": pos.ticket,
+                "comment": "TP hit" if hit_tp else "SL hit",
+            }
 
-        # Clean up expired and triggered orders
-        for order in expired_orders + triggered_orders:
-            
-            if order in self.orders_container:
-                self.orders_container.remove(order)
+            self.order_send(request)
 
+    def __pending_orders_monitoring(self):
+        
+        """
+        Monitors pending orders:
+        - handles expiration
+        - triggers STOP / LIMIT orders correctly
+        - converts them into market positions
+        """
+
+        for order in list(self.__orders_container__):
+
+            symbol = order.symbol
+            tick = self.tick_cache[symbol]
+
+            # --- Expiration handling ---
+            if order.time_expiration > 0 and tick.time >= order.time_expiration:
+                self.__orders_container__.remove(order)
+                continue
+
+            triggered = False
+            deal_type = None
+            deal_price = None
+
+            # -------- BUY ORDERS --------
+            if order.type == self.mt5_instance.ORDER_TYPE_BUY_LIMIT:
+                if tick.ask <= order.price:
+                    triggered = True
+                    deal_type = self.mt5_instance.ORDER_TYPE_BUY
+                    deal_price = order.price
+
+            elif order.type == self.mt5_instance.ORDER_TYPE_BUY_STOP:
+                if tick.ask >= order.price:
+                    triggered = True
+                    deal_type = self.mt5_instance.ORDER_TYPE_BUY
+                    deal_price = tick.ask
+
+            elif order.type == self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT:
+                if tick.ask >= order.price:
+                    # Convert to BUY LIMIT at stoplimit price
+                    order.type = self.mt5_instance.ORDER_TYPE_BUY_LIMIT
+                    order.price = order.price_stoplimit
+                continue
+
+            # -------- SELL ORDERS --------
+            elif order.type == self.mt5_instance.ORDER_TYPE_SELL_LIMIT:
+                if tick.bid >= order.price:
+                    triggered = True
+                    deal_type = self.mt5_instance.ORDER_TYPE_SELL
+                    deal_price = order.price
+
+            elif order.type == self.mt5_instance.ORDER_TYPE_SELL_STOP:
+                if tick.bid <= order.price:
+                    triggered = True
+                    deal_type = self.mt5_instance.ORDER_TYPE_SELL
+                    deal_price = tick.bid
+
+            elif order.type == self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT:
+                if tick.bid <= order.price:
+                    order.type = self.mt5_instance.ORDER_TYPE_SELL_LIMIT
+                    order.price = order.price_stoplimit
+                continue
+
+            if not triggered:
+                continue
+
+            # ----- Execute pending order -----
+            request = {
+                "action": self.mt5_instance.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "type": deal_type,
+                "price": deal_price,
+                "sl": order.sl,
+                "tp": order.tp,
+                "volume": order.volume,
+                "magic": order.magic,
+                "comment": order.comment,
+            }
+
+            result = self.order_send(request)
+
+            # ----- Remove pending order after successful execution -----
+            if result and result.get("retcode") == self.mt5_instance.TRADE_RETCODE_DONE:
+                self.__orders_container__.remove(order)
