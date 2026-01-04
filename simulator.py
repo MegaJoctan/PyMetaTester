@@ -13,7 +13,6 @@ from collections import namedtuple
 import polars as pl
 import utils
 import config
-from toolbox_gui import SimToolboxGUI
 from validators import TradeValidators
 from Trade.Trade import CTrade
 
@@ -206,14 +205,24 @@ class Simulator:
                 company=mt5_acc_info.company,
             )
         )
-        
-        self.toolbox_gui = SimToolboxGUI()  # Initialize the GUI
 
         self.IS_RUNNING = True # is the simulator running or stopped
         self.IS_TESTER = True # are we on the strategy tester mode or live trading 
         
         self.symbol_info_cache: dict[str, namedtuple] = {}
         self.tick_cache: dict[str, namedtuple] = {}
+        
+        self.ORDER_TYPES = [
+            self.mt5_instance.ORDER_TYPE_BUY,
+            self.mt5_instance.ORDER_TYPE_SELL,
+            self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
+            self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
+            self.mt5_instance.ORDER_TYPE_BUY_STOP,
+            self.mt5_instance.ORDER_TYPE_SELL_STOP,
+            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
+            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
+            self.mt5_instance.ORDER_TYPE_CLOSE_BY
+            ]
         
     def Start(self, IS_TESTER: bool) -> bool: # simulator start
         
@@ -256,6 +265,11 @@ class Simulator:
         return self.symbol_info_cache[symbol]
 
     def symbol_info_tick(self, symbol: str) -> namedtuple:
+        """Get the last tick for the specified financial instrument.
+
+        Returns:
+            namedtuple: 
+        """
         
         if self.IS_TESTER:
             return self.tick_cache[symbol] 
@@ -977,13 +991,13 @@ class Simulator:
     
     def __generate_order_ticket(self) -> int:
         ts = int(time.time_ns())
-        rand = secrets.randbits(20)
-        return (ts << 20) | rand
+        rand = secrets.randbits(6)
+        return (ts << 6) | rand
 
     def __generate_position_ticket(self) -> int:
         ts = int(time.time_ns())
-        rand = secrets.randbits(24)
-        return (ts << 24) | rand
+        rand = secrets.randbits(6)
+        return (ts << 6) | rand
 
     def __calc_commission(self) -> float:
         """
@@ -991,160 +1005,341 @@ class Simulator:
         """
 
         return -0.2
-    
+        
     def order_send(self, request: dict):
+        """
+        Sends a request to perform a trading operation from the terminal to the trade server. The function is similar to OrderSend in MQL5.
+        """
 
-        now = datetime.now(timezone.utc)
-        now_ts = int(now.timestamp())
-        now_msc = int(now.timestamp() * 1000)
-
-        action = request.get("action")
-        symbol = request.get("symbol")
-        volume = request.get("volume", 0.0)
-        price  = request.get("price", 0.0)
-        sl     = request.get("sl", 0.0)
-        tp     = request.get("tp", 0.0)
-        order_type = request.get("type")
-
+        # -----------------------------------------------------
+        
         if not self.IS_TESTER:
-            
             result = self.mt5_instance.order_send(request)
-
-            if result is None:
-                self.__GetLogger().warning(f"Failed, MT5 error: {self.mt5_instance.last_error()}")
+            if result is None or result.retcode != self.mt5_instance.TRADE_RETCODE_DONE:
+                self.__GetLogger().warning(f"MT5 failed: {self.mt5_instance.last_error()}")
                 return None
+            return result
 
-            if result.retcode != self.mt5_instance.TRADE_RETCODE_DONE:
-                self.__GetLogger().warning(f"Failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
+        # -------------------- Extract request -----------------------------
+        
+        action     = request.get("action")
+        order_type = request.get("type")
+        symbol     = request.get("symbol")
+        volume     = float(request.get("volume", 0))
+        price      = float(request.get("price", 0))
+        sl         = float(request.get("sl", 0))
+        tp         = float(request.get("tp", 0))
+        ticket     = int(request.get("ticket", -1))
+        
+        ticks_info = self.tick_cache[symbol]
+        symbol_info = self.symbol_info(symbol)
+        ac_info = self.account_info()
+        
+        now = ticks_info.time
+        ts  = int(now)
+        msc = int(now * 1000)
+        
+        if order_type not in self.ORDER_TYPES:
+            return {"retcode": self.mt5_instance.TRADE_RETCODE_INVALID}
+        
+        
+        trade_validators = TradeValidators(symbol_info=symbol_info, 
+                                           ticks_info=ticks_info, 
+                                           logger=self.__GetLogger(), 
+                                           mt5_instance=self.mt5_instance)
+        
+        # -------------------- REMOVE pending order ------------------------
+        
+        if action == self.mt5_instance.TRADE_ACTION_REMOVE:
+            
+            ticket = request.get("order", -1)
+            
+            self.__orders_container__ = [
+                o for o in self.__orders_container__ if o.ticket != ticket
+            ]
+            
+            return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
+
+        # --------------------- PENDING order --------------------------
+        
+        if action == self.mt5_instance.TRADE_ACTION_PENDING:
+            
+            if trade_validators.is_max_orders_reached(open_orders=len(self.__orders_container__), 
+                                                      ac_limit_orders=ac_info.limit_orders):
                 return None
-        
-        # ---------------- Validate a position -------------
-        
-        validators = TradeValidators(symbol_info=self.symbol_info(symbol),
-                                     ticks_info=self.tick_cache[symbol],
-                                     logger=self.__GetLogger())
-        
-        if not validators.all_validators(
-                lotsize=volume,
-                pos_type=action,
-                entry=price,
-                sl=sl,
-                tp=tp,
-                margin_required=self.order_calc_margin(action=action, symbol=symbol, volume=volume, price=price),
-                free_margin=self.AccountInfo.margin_free
-            ):
-            return None
-        
-        position_id = self.__generate_position_ticket()
-        ticket = self.__generate_order_ticket()
-        
-        # ---------------- Market Exectution ----------------
-        
-        if action == self.mt5_instance.TRADE_ACTION_DEAL:
-
-            # Create DEAL
-            deal = self.TradeDeal(
-                ticket=self.__generate_deal_ticket(),
-                order=ticket,
-                time=now_ts,
-                time_msc=now_msc,
-                type=order_type,
-                entry=self.mt5_instance.DEAL_ENTRY_IN,
-                magic=request.get("magic", 0),
-                position_id=position_id,
-                reason=self.mt5_instance.DEAL_REASON_EXPERT,
-                volume=volume,
-                price=price,
-                commission=self.__calc_commission(),
-                swap=0.0,
-                profit=0.0,
-                fee=0.0,
-                symbol=symbol,
-                comment=request.get("comment", ""),
-                external_id="",
-            )
-
-            self.__deals_history_container__.append(deal)
-
-            # Create POSITION
-            position = self.TradePosition(
-                ticket=position_id,
-                time=now_ts,
-                time_msc=now_msc,
-                time_update=now_ts,
-                time_update_msc=now_msc,
-                type=order_type,
-                magic=request.get("magic", 0),
-                identifier=position_id,
-                reason=self.mt5_instance.DEAL_REASON_EXPERT,
-                volume=volume,
-                price_open=price,
-                sl=sl,
-                tp=tp,
-                price_current=price,
-                swap=0.0,
-                profit=0.0,
-                symbol=symbol,
-                comment=request.get("comment", ""),
-                external_id="",
-            )
-
-            self.__positions_container__.append(position)
-
-            return {
-                "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
-                "deal": deal.ticket,
-                "order": ticket,
-                "position": position_id,
-            }
-
-        # --------------- Pending Order ------------------
-
-        elif action == self.mt5_instance.TRADE_ACTION_PENDING:
+            
+            if not trade_validators.is_valid_sl(entry=price, sl=sl, order_type=order_type) or not trade_validators.is_valid_tp(entry=price, tp=tp, order_type=order_type):
+                return None
+            
+            total_volume = sum([pos.volume for pos in self.__positions_container__]) + sum([order.volume for order in self.__orders_container__])
+            if trade_validators.is_symbol_volume_reached(symbol_volume=total_volume, volume_limit=symbol_info.volume_limit):
+                return None
+            
+            order_ticket = self.__generate_order_ticket()
 
             order = self.TradeOrder(
-                ticket=ticket,
-                time_setup=now_ts,
-                time_setup_msc=now_msc,
-                time_done=0,
-                time_done_msc=0,
-                time_expiration=request.get("expiration", 0),
+                    ticket=order_ticket,
+                    time_setup=ts,
+                    time_setup_msc=msc,
+                    time_done=0,
+                    time_done_msc=0,
+                    time_expiration=request.get("expiration", 0),
+                    type=order_type,
+                    type_time=request.get("type_time", 0),
+                    type_filling=request.get("type_filling", 0),
+                    state=self.mt5_instance.ORDER_STATE_PLACED,
+                    magic=request.get("magic", 0),
+                    position_id=0,
+                    position_by_id=0,
+                    reason=self.mt5_instance.DEAL_REASON_EXPERT,
+                    volume_initial=volume,
+                    volume_current=volume,
+                    price_open=price,
+                    sl=sl,
+                    tp=tp,
+                    price_current=price,
+                    price_stoplimit=request.get("price_stoplimit", 0),
+                    symbol=symbol,
+                    comment=request.get("comment", ""),
+                    external_id="",
+                )
+                
+            self.__orders_container__.append(order) 
+            self.__orders_history_container__.append(order)
+            
+            return {
+                "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
+                "order": order_ticket,
+            }
+
+        # ------------------ MARKET DEAL (open or close) ------------------
+        
+        if action == self.mt5_instance.TRADE_ACTION_DEAL:
+            
+            def deal_reason_gen() -> int:
+                eps = pow(10, -symbol_info.digits)
+                if TradeValidators.price_equal(a=price, b=sl, eps=eps):
+                    return self.mt5_instance.DEAL_REASON_SL
+                
+                if TradeValidators.price_equal(a=price, b=tp, eps=eps):
+                    return self.mt5_instance.DEAL_REASON_TP
+                
+                return self.mt5_instance.DEAL_REASON_EXPERT
+                
+            # ---------- CLOSE POSITION ----------
+            
+            ticket = request.get("position", -1)
+            if ticket != -1:
+                pos = next(
+                    (p for p in self.__positions_container__ if p.ticket == ticket),
+                    None,
+                )
+                
+                if not pos:
+                    return {"retcode": self.mt5_instance.TRADE_RETCODE_INVALID}
+
+                # validate position close request
+                
+                if pos.type == order_type:
+                    self.__GetLogger().critical("Failed to close an order. Order type must be the opposite")
+                    return None
+                
+                if order_type == self.mt5_instance.ORDER_TYPE_BUY: # For a sell order/position
+                    
+                    if not TradeValidators.price_equal(a=price, b=ticks_info.ask, eps=pow(10, -symbol_info.digits)):
+                        self.__GetLogger().critical(f"Failed to close ORDER_TYPE_SELL. Price {price} is not equal to bid {ticks_info.bid}")
+                        return None
+                        
+                elif order_type == self.mt5_instance.ORDER_TYPE_SELL: # For a buy order/position
+                    if not TradeValidators.price_equal(a=price, b=ticks_info.bid, eps=pow(10, -symbol_info.digits)):
+                        self.__GetLogger().critical(f"Failed to close ORDER_TYPE_BUY. Price {price} is not equal to bid {ticks_info.bid}")
+                        return None
+                        
+                    
+                self.__positions_container__.remove(pos)
+                
+                deal_ticket = self.__generate_deal_ticket()
+                self.__deals_history_container__.append(
+                    self.TradeDeal(
+                        ticket=deal_ticket,
+                        order=0,
+                        time=ts,
+                        time_msc=msc,
+                        type=order_type,
+                        entry=self.mt5_instance.DEAL_ENTRY_OUT,
+                        magic=request.get("magic", 0),
+                        position_id=pos.ticket,
+                        reason=deal_reason_gen(),
+                        volume=volume,
+                        price=price,
+                        commission=self.__calc_commission(),
+                        swap=0,
+                        profit=0,
+                        fee=0,
+                        symbol=symbol,
+                        comment=request.get("comment", ""),
+                        external_id="",
+                    )
+                )
+
+                return {
+                    "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
+                    "deal": deal_ticket,
+                }
+                
+            # ---------- OPEN POSITION ----------
+            
+            # validate new stops 
+            
+            if not trade_validators.is_valid_sl(entry=price, sl=sl, order_type=order_type):
+                return None
+            if not trade_validators.is_valid_tp(entry=price, tp=tp, order_type=order_type):
+                return None
+            
+            # validate the lotsize
+            
+            if not trade_validators.is_valid_lotsize(lotsize=volume):
+                return None
+            
+            total_volume = sum([pos.volume for pos in self.__positions_container__]) + sum([order.volume for order in self.__orders_container__])
+            if trade_validators.is_symbol_volume_reached(symbol_volume=total_volume, volume_limit=symbol_info.volume_limit):
+                return None
+            
+            
+            if not trade_validators.is_there_enough_money(margin_required=self.order_calc_margin(order_type=order_type, 
+                                                                                                 symbol=symbol,
+                                                                                                 volume=volume,
+                                                                                                 price=price), 
+                                                          free_margin=ac_info.margin_free):
+                return None
+            
+            position_ticket = self.__generate_position_ticket()
+            order_ticket    = self.__generate_order_ticket()
+            deal_ticket     = self.__generate_deal_ticket()
+
+            position = self.TradePosition(
+                ticket=position_ticket,
+                time=ts,
+                time_msc=msc,
+                time_update=ts,
+                time_update_msc=msc,
                 type=order_type,
-                type_time=request.get("type_time", 0),
-                type_filling=request.get("type_filling", 0),
-                state=self.mt5_instance.ORDER_STATE_PLACED,
                 magic=request.get("magic", 0),
-                position_id=0,
-                position_by_id=0,
+                identifier=position_ticket,
                 reason=self.mt5_instance.DEAL_REASON_EXPERT,
-                volume_initial=volume,
-                volume_current=volume,
+                volume=volume,
                 price_open=price,
                 sl=sl,
                 tp=tp,
                 price_current=price,
-                price_stoplimit=request.get("price_stoplimit", 0.0),
+                swap=0,
+                profit=0,
                 symbol=symbol,
                 comment=request.get("comment", ""),
                 external_id="",
             )
+            
+            self.__positions_container__.append(position)
 
-            self.__orders_container__.append(order)
-
+            self.__deals_history_container__.append(
+                self.TradeDeal(
+                    ticket=deal_ticket,
+                    order=order_ticket,
+                    time=ts,
+                    time_msc=msc,
+                    type=order_type,
+                    entry=self.mt5_instance.DEAL_ENTRY_IN,
+                    magic=request.get("magic", 0),
+                    position_id=position_ticket,
+                    reason=deal_reason_gen(),
+                    volume=volume,
+                    price=price,
+                    commission=self.__calc_commission(),
+                    swap=0,
+                    profit=0,
+                    fee=0,
+                    symbol=symbol,
+                    comment=request.get("comment", ""),
+                    external_id="",
+                )
+            )
+            
             return {
                 "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
-                "order": ticket,
+                "deal": deal_ticket,
+                "order": order_ticket,
+                "position": position_ticket,
             }
+            
+        elif action == self.mt5_instance.TRADE_ACTION_MODIFY: # Modifying pending orders
 
-        # ------------------ Invalid Action ----------------
-        
+            ticket = request.get("order", -1)
+
+            order = next(
+                (o for o in self.__orders_container__ if o.ticket == ticket),
+                None,
+            )
+
+            if not order:
+                return {"retcode": self.mt5_instance.TRADE_RETCODE_INVALID}
+
+            # validate new stops 
+            
+            if not trade_validators.is_valid_freeze_level(entry=price, stop_price=sl, order_type=order_type):
+                return None
+            if not trade_validators.is_valid_freeze_level(entry=price, stop_price=tp, order_type=order_type):
+                return None
+                
+            # Modify ONLY allowed fields
+            order.price_open      = price
+            order.sl              = sl
+            order.tp              = tp
+            order.time_expiration = request.get("expiration", order.time_expiration)
+            order.price_stoplimit = request.get("price_stoplimit", order.price_stoplimit)
+
+            return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
+            
+        elif action == self.mt5_instance.TRADE_ACTION_SLTP: # Modifying an open position
+            
+            ticket = request.get("position", -1)
+
+            pos = next(
+                (p for p in self.__positions_container__ if p.ticket == ticket),
+                None,
+            )
+
+            if not pos:
+                return {"retcode": self.mt5_instance.TRADE_RETCODE_INVALID}
+
+            # Check for valid stoplosses and TPs ensuring they are not too close to the market
+            
+            if pos.type == self.mt5_instance.ORDER_TYPE_BUY:
+                if not trade_validators.is_valid_sl(entry=ticks_info.bid, sl=sl, order_type=order_type) or not trade_validators.is_valid_tp(entry=ticks_info.bid, tp=tp, order_type=order_type):
+                    return None
+                
+            elif pos.type == self.mt5_instance.ORDER_TYPE_SELL:
+                if not trade_validators.is_valid_sl(entry=ticks_info.ask, sl=sl, order_type=order_type) or not trade_validators.is_valid_tp(entry=ticks_info.ask, tp=tp, order_type=order_type):
+                    return None
+            
+            if not trade_validators.is_valid_freeze_level(entry=price, stop_price=sl, order_type=order_type):
+                return None
+            if not trade_validators.is_valid_freeze_level(entry=price, stop_price=sl, order_type=order_type):
+                return None
+            
+            pos.sl = sl
+            pos.tp = tp
+            pos.time_update = ts
+            pos.time_update_msc = msc
+
+            return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
+
         return {
             "retcode": self.mt5_instance.TRADE_RETCODE_INVALID,
             "comment": "Unsupported trade action",
         }
     
     def order_calc_profit(self, 
-                        action: int,
+                        order_type: int,
                         symbol: str,
                         volume: float,
                         price_open: float,
@@ -1153,7 +1348,7 @@ class Simulator:
         Return profit in the account currency for a specified trading operation.
         
         Args:
-            action (int): The type of position taken, either 0 (buy) or 1 (sell).
+            order_type (int): The type of position taken, either 0 (buy) or 1 (sell).
             symbol (str): Financial instrument name. 
             volume (float):   Trading operation volume.
             price_open (float): Open Price.
@@ -1179,10 +1374,11 @@ class Simulator:
                 self.mt5_instance.ORDER_TYPE_SELL_STOP,
                 self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
             }
+            
             # --- Determine direction ---
-            if action in BUY_ACTIONS: #TODO: 
+            if order_type in BUY_ACTIONS: #TODO: 
                 direction = 1
-            elif action in SELL_ACTIONS:
+            elif order_type in SELL_ACTIONS:
                 direction = -1
 
             # --- Core profit calculation ---
@@ -1240,7 +1436,7 @@ class Simulator:
                 elif calc_mode == self.mt5_instance.SYMBOL_CALC_MODE_SERV_COLLATERAL:
                     liquidity_rate = sym.trade_liquidity_rate
                     market_price = (
-                        self.tick_cache[symbol].ask if action == self.mt5_instance.ORDER_TYPE_BUY else self.tick_cache[symbol].bid
+                        self.tick_cache[symbol].ask if order_type == self.mt5_instance.ORDER_TYPE_BUY else self.tick_cache[symbol].bid
                     )
 
                     profit = (
@@ -1266,7 +1462,7 @@ class Simulator:
             
         try:
             profit = self.mt5_instance.order_calc_profit(
-                action,
+                order_type,
                 symbol,
                 volume,
                 price_open,
@@ -1279,7 +1475,7 @@ class Simulator:
         
         return profit
     
-    def order_calc_margin(self, action: int, symbol: str, volume: float, price: float) -> float:
+    def order_calc_margin(self, order_type: int, symbol: str, volume: float, price: float) -> float:
         """
         Return margin in the account currency to perform a specified trading operation.
         
@@ -1291,7 +1487,7 @@ class Simulator:
 
         if not self.IS_TESTER:
             try:
-                return round(self.mt5_instance.order_calc_margin(action, symbol, volume, price), 2)
+                return round(self.mt5_instance.order_calc_margin(order_type, symbol, volume, price), 2)
             except Exception:
                 self.__GetLogger().warning(f"Failed: MT5 Error = {self.mt5_instance.last_error()}")
                 return 0.0
@@ -1300,7 +1496,7 @@ class Simulator:
         sym = self.symbol_info(symbol)
 
         contract_size = sym.trade_contract_size
-        leverage = max(self.AccountInfo.leverage, 1)
+        leverage = max(self.account_info().leverage, 1)
 
         margin_rate = (
             sym.margin_initial
@@ -1367,7 +1563,7 @@ class Simulator:
         for pos in self.__positions_container__:
             
             unrealized_pl += pos.profit
-            total_margin += self.order_calc_margin(action=pos.type, 
+            total_margin += self.order_calc_margin(order_type=pos.type, 
                                                    symbol=pos.symbol,
                                                    volume=pos.volume,
                                                    price=pos.price)
@@ -1397,7 +1593,7 @@ class Simulator:
             
             # Monitor and calculate the profit of a position
             
-            profit = self.order_calc_profit(action=pos.type,
+            profit = self.order_calc_profit(order_type=pos.type,
                                             symbol=pos.symbol,
                                             volume=pos.volume,
                                             price_open=pos.price_open,
