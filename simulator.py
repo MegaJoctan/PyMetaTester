@@ -1031,9 +1031,15 @@ class Simulator:
         tp         = float(request.get("tp", 0))
         ticket     = int(request.get("ticket", -1))
         
-        ticks_info = self.tick_cache[symbol]
+        # try:
+        
+        ticks_info = self.symbol_info_tick(symbol)
         symbol_info = self.symbol_info(symbol)
         ac_info = self.account_info()
+        
+        # except Exception as e:
+        #     self.__GetLogger().critical(f"Failed to obtain necessary ticks, symbol, or account info: {e}")
+        #     return None
         
         now = ticks_info.time
         ts  = int(now)
