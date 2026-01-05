@@ -413,13 +413,14 @@ class CTrade:
         """
     
         order = self.simulator.orders_get(ticket=ticket)[0]
-        symbol = order.symbol
+        if order is None:
+            self.__GetLogger().info(f"Order {order} not found!")
         
         request = {
             "action": self.mt5_instance.TRADE_ACTION_REMOVE,
             "order": ticket,
             "magic": self.magic_number,
-            "symbol": symbol
+            "symbol": order.symbol
         }
         
         # Send the delete request
