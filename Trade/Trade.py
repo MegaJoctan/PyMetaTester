@@ -1,11 +1,13 @@
 import MetaTrader5 as mt5
-import error_description
 from datetime import datetime, timezone
+import config
 
 class CTrade:
     
-    def __init__(self, magic_number: int, filling_type_symbol: str, deviation_points: int):
+    def __init__(self, simulator, magic_number: int, filling_type_symbol: str, deviation_points: int):
         
+        self.simulator = simulator
+        self.mt5_instance = simulator.mt5_instance
         self.magic_number = magic_number
         self.deviation_points = deviation_points
         self.filling_type = self._get_type_filling(filling_type_symbol)
@@ -16,19 +18,25 @@ class CTrade:
         
     def _get_type_filling(self, symbol):
         
-        symbol_info = mt5.symbol_info(symbol)
+        symbol_info = self.simulator.symbol_info(symbol)
         if symbol_info is None:
             print(f"Failed to get symbol info for {symbol}")
         
         filling_map = {
-            1: mt5.ORDER_FILLING_FOK,
-            2: mt5.ORDER_FILLING_IOC,
-            4: mt5.ORDER_FILLING_BOC,
-            8: mt5.ORDER_FILLING_RETURN
+            1: self.mt5_instance.ORDER_FILLING_FOK,
+            2: self.mt5_instance.ORDER_FILLING_IOC,
+            4: self.mt5_instance.ORDER_FILLING_BOC,
+            8: self.mt5_instance.ORDER_FILLING_RETURN
         }
         
         return filling_map.get(symbol_info.filling_mode, f"Unknown Filling type")
     
+    
+    def __GetLogger(self):
+        if self.simulator.IS_TESTER:
+            return config.tester_logger
+        
+        return config.simulator_logger
     
     def position_open(self, symbol: str, volume: float, order_type: int, price: float, sl: float=0.0, tp: float=0.0, comment: str="") -> bool:
         
@@ -54,7 +62,7 @@ class CTrade:
         """
         
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+            "action": self.mt5_instance.TRADE_ACTION_DEAL,
             "symbol": symbol,
             "volume": volume,
             "type": order_type,
@@ -62,7 +70,7 @@ class CTrade:
             "deviation": self.deviation_points,
             "magic": self.magic_number,
             "comment": comment,
-            "type_time": mt5.ORDER_TIME_GTC,
+            "type_time": self.mt5_instance.ORDER_TIME_GTC,
             "type_filling":  self.filling_type,
         }
         
@@ -71,18 +79,11 @@ class CTrade:
         if tp > 0.0:
             request["tp"] = tp
         
-        # send a trading request
-        result = mt5.order_send(request)
-        
-        if result is None:
-            print(f"order_send() failed, error: {mt5.last_error()}")
+        if self.simulator.order_send(request) is None:
             return False
         
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Position send failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
-            return False
-        
-        print(f"Position Opened successfully!")
+        self.__GetLogger().info(f"Position Opened successfully!")
+            
         return True
     
     
@@ -110,24 +111,13 @@ class CTrade:
             bool: True if order was placed successfully, False otherwise
         """
         
-        # Check symbol info
-        symbol_info = mt5.symbol_info(symbol)
-        if symbol_info is None:
-            print(f"Symbol {symbol} not found")
-            return False
-
-        if not symbol_info.visible:
-            if not mt5.symbol_select(symbol, True):
-                print(f"Failed to select symbol {symbol}")
-                return False
-        
         # Validate expiration for time-specific orders
-        if type_time in (mt5.ORDER_TIME_SPECIFIED, mt5.ORDER_TIME_SPECIFIED_DAY) and expiration is None:
+        if type_time in (self.mt5_instance.ORDER_TIME_SPECIFIED, self.mt5_instance.ORDER_TIME_SPECIFIED_DAY) and expiration is None:
             print(f"Expiration required for order type {type_time}")
             return False
         
         request = {
-            "action": mt5.TRADE_ACTION_PENDING,
+            "action": self.mt5_instance.TRADE_ACTION_PENDING,
             "symbol": symbol,
             "volume": volume,
             "type": order_type,
@@ -142,7 +132,7 @@ class CTrade:
         }
         
         # Add expiration if required
-        if type_time in (mt5.ORDER_TIME_SPECIFIED, mt5.ORDER_TIME_SPECIFIED_DAY) and expiration is not None:
+        if type_time in (self.mt5_instance.ORDER_TIME_SPECIFIED, self.mt5_instance.ORDER_TIME_SPECIFIED_DAY) and expiration is not None:
             
             # Convert to broker's expected format (UTC timestamp in milliseconds)
             
@@ -151,17 +141,11 @@ class CTrade:
             
             
         # Send order
-        result = mt5.order_send(request)
-
-        if result is None:
-            print(f"order_send() failed, error: {mt5.last_error()}")
-            return False
-
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"order_send() failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
+        
+        if self.simulator.order_send(request) is None:
             return False
         
-        print(f"Order #{result.order} opened successfully!")
+        self.__GetLogger().info(f"Order opened successfully!")
         return True
     
     
@@ -182,7 +166,7 @@ class CTrade:
             bool: True if order was sent successfully, False otherwise
         """
     
-        return self.position_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_BUY, price=price, sl=sl, tp=tp, comment=comment)
+        return self.position_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_BUY, price=price, sl=sl, tp=tp, comment=comment)
 
     def sell(self, volume: float, symbol: str, price: float, sl: float=0.0, tp: float=0.0, comment: str="") -> bool:
         
@@ -201,7 +185,7 @@ class CTrade:
             bool: True if order was sent successfully, False otherwise
         """
         
-        return self.position_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_SELL, price=price, sl=sl, tp=tp, comment=comment)
+        return self.position_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_SELL, price=price, sl=sl, tp=tp, comment=comment)
     
     def buy_limit(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
         
@@ -226,7 +210,7 @@ class CTrade:
             bool: True if order was placed successfully, False otherwise
         """
         
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_BUY_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_BUY_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
         
     def sell_limit(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
             
@@ -251,7 +235,7 @@ class CTrade:
             bool: True if order was placed successfully, False otherwise
         """
 
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_SELL_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_SELL_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
         
     def buy_stop(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
 
@@ -276,7 +260,7 @@ class CTrade:
             bool: True if order was placed successfully, False otherwise
         """
         
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_BUY_STOP, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_BUY_STOP, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
         
     def sell_stop(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
         
@@ -301,11 +285,12 @@ class CTrade:
             bool: True if order was placed successfully, False otherwise
         """
         
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_SELL_STOP, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
-        
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_SELL_STOP, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+    
+    """    
     def buy_stop_limit(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
         
-        """
+        \"""
         Places a buy stop limit pending order.
         
         Args:
@@ -324,13 +309,13 @@ class CTrade:
         
         Returns:
             bool: True if order was placed successfully, False otherwise
-        """
+        \"""
         
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_BUY_STOP_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
         
     def sell_stop_limit(self, volume: float, price: float, symbol: str, sl: float=0.0, tp: float=0.0, type_time: float=mt5.ORDER_TIME_GTC, expiration: datetime=None, comment: str="") -> bool:
         
-        """
+        \"""
         Places a sell stop limit pending order.
         
         Args:
@@ -349,11 +334,12 @@ class CTrade:
         
         Returns:
             bool: True if order was placed successfully, False otherwise
+        \"""
+        
+        return self.order_open(symbol=symbol, volume=volume, order_type=self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
+
         """
         
-        return self.order_open(symbol=symbol, volume=volume, order_type=mt5.ORDER_TYPE_SELL_STOP_LIMIT, price=price, sl=sl, tp=tp, type_time=type_time, expiration=expiration, comment=comment)
-
-
     def position_close(self, ticket: int, deviation: float=float("nan")) -> bool:
         
         """
@@ -371,23 +357,27 @@ class CTrade:
         """
             
         # Select position by ticket
-        if not mt5.positions_get(ticket=ticket):
+        if not self.simulator.positions_get(ticket=ticket):
             print(f"Position with ticket {ticket} not found.")
             return False
 
-        position = mt5.positions_get(ticket=ticket)[0]
+        position = self.simulator.positions_get(ticket=ticket)[0]
         symbol = position.symbol
         volume = position.volume
         position_type = position.type  # 0=BUY, 1=SELL
-
+    
         # Get close price (BID for buy, ASK for sell)
-        price = mt5.symbol_info_tick(symbol).bid if position_type == mt5.POSITION_TYPE_BUY else mt5.symbol_info_tick(symbol).ask
+        
+        # print("pos_type: ", position_type, " order type buy: ",self.mt5_instance.ORDER_TYPE_BUY, " order type sell: ",self.mt5_instance.ORDER_TYPE_SELL)
+        
+        tick_info = self.simulator.symbol_info_tick(symbol)
+        price = tick_info.bid if position_type == self.mt5_instance.POSITION_TYPE_BUY else tick_info.ask
 
         # Set close order type
-        order_type = mt5.ORDER_TYPE_SELL if position_type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        order_type = self.mt5_instance.ORDER_TYPE_SELL if position_type == self.mt5_instance.POSITION_TYPE_BUY else self.mt5_instance.ORDER_TYPE_BUY
 
         request = {
-            "action": mt5.TRADE_ACTION_DEAL,
+            "action": self.mt5_instance.TRADE_ACTION_DEAL,
             "position": ticket,
             "symbol": symbol,
             "volume": volume,
@@ -395,23 +385,16 @@ class CTrade:
             "type": order_type,
             "price": price,
             "deviation": deviation if not isinstance(deviation, float) or not str(deviation) == 'nan' else self.deviation_points, 
-            "type_time": mt5.ORDER_TIME_GTC,
+            "type_time": self.mt5_instance.ORDER_TIME_GTC,
             "type_filling": self.filling_type,
         }
 
         # Send the close request
-        result = mt5.order_send(request)
-
-        # Check result
-        if result is None:
-            print(f"order_send() failed, error: {mt5.last_error()}")
+        
+        if self.simulator.order_send(request) is None:
             return False
 
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Close failed. retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
-            return False
-
-        print(f"Position {ticket} closed successfully!")
+        self.__GetLogger().info(f"Position {ticket} closed successfully!")
         return True
     
     def order_delete(self, ticket: int) -> bool:
@@ -429,25 +412,22 @@ class CTrade:
             Prints error message if deletion fails
         """
     
+        order = self.simulator.orders_get(ticket=ticket)[0]
+        symbol = order.symbol
+        
         request = {
-            "action": mt5.TRADE_ACTION_REMOVE,
+            "action": self.mt5_instance.TRADE_ACTION_REMOVE,
             "order": ticket,
-            "magic": self.magic_number
+            "magic": self.magic_number,
+            "symbol": symbol
         }
-
+        
         # Send the delete request
-        result = mt5.order_send(request)
-
-        # Check result
-        if result is None:
-            print(f"order_delete() failed, error: {mt5.last_error()}")
+        
+        if self.simulator.order_send(request) is None:
             return False
 
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Failed to delete an order with ticket = {ticket}, retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
-            return False
-
-        print(f"Order {ticket} deleted successfully!")
+        self.__GetLogger().info(f"Order {ticket} deleted successfully!")
         return True
             
 
@@ -469,15 +449,15 @@ class CTrade:
         """
         
         # Select position by ticket
-        if not mt5.positions_get(ticket=ticket):
+        if not self.simulator.positions_get(ticket=ticket):
             print(f"Position with ticket {ticket} not found.")
             return False
 
-        position = mt5.positions_get(ticket=ticket)[0]
+        position = self.simulator.positions_get(ticket=ticket)[0]
         symbol = position.symbol
         
         request = {
-            "action": mt5.TRADE_ACTION_SLTP,
+            "action": self.mt5_instance.TRADE_ACTION_SLTP,
             "position": ticket,
             "magic": self.magic_number,
             "symbol": symbol,
@@ -485,18 +465,12 @@ class CTrade:
             "tp": tp
         }
         
-        # send a trading request
-        result = mt5.order_send(request)
+        # send a position modify request
         
-        if result is None:
-            print(f"order_modify() failed, error: {mt5.last_error()}")
+        if self.simulator.order_send(request) is None:
             return False
         
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Position modify failed retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
-            return False
-        
-        print(f"Position {ticket} modified successfully!")
+        self.__GetLogger().info(f"Position {ticket} modified successfully!")
         return True
     
     def order_modify(self, ticket: int, price: float, sl: float, tp: float, type_time: int = mt5.ORDER_TIME_GTC, expiration: datetime = None, stoplimit: float = 0.0) -> bool:
@@ -521,7 +495,7 @@ class CTrade:
         """
         
         # Get the order by ticket
-        order = mt5.orders_get(ticket=ticket)
+        order = self.simulator.orders_get(ticket=ticket)
         if not order:
             print(f"Order with ticket {ticket} not found")
             return False
@@ -529,7 +503,7 @@ class CTrade:
         order = order[0]  # Get the first (and only) order
         
         request = {
-            "action": mt5.TRADE_ACTION_MODIFY,
+            "action": self.mt5_instance.TRADE_ACTION_MODIFY,
             "order": ticket,
             "price": price,
             "sl": sl,
@@ -542,7 +516,7 @@ class CTrade:
         }
         
         # Add expiration if specified (for ORDER_TIME_SPECIFIED)
-        if type_time == mt5.ORDER_TIME_SPECIFIED:
+        if type_time == self.mt5_instance.ORDER_TIME_SPECIFIED:
             if expiration is None:
                 print("Error: expiration must be specified for ORDER_TIME_SPECIFIED")
                 return False
@@ -550,20 +524,13 @@ class CTrade:
             request["expiration"] = expiration
         
         # Add stoplimit for STOP_LIMIT orders
-        if order.type in (mt5.ORDER_TYPE_BUY_STOP_LIMIT, mt5.ORDER_TYPE_SELL_STOP_LIMIT):
+        if order.type in (self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT, self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT):
             request["stoplimit"] = stoplimit
 
         # Send the modification request
-        result = mt5.order_send(request)
-
-        # Check result
-        if result is None:
-            print(f"order_modify() failed, error: {mt5.last_error()}")
+        
+        if self.simulator.order_send(request) is None:
             return False
 
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
-            print(f"Failed to modify order {ticket}, retcode: {result.retcode} description: {error_description.trade_server_return_code_description(result.retcode)}")
-            return False
-
-        print(f"Order {ticket} modified successfully!")
+        self.__GetLogger().info(f"Order {ticket} modified successfully!")
         return True
