@@ -4,7 +4,6 @@ import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
 import time
-import pytz
 import os
 import numpy as np
 import fnmatch
