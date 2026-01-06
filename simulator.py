@@ -4,6 +4,7 @@ import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
 import time
+import pytz
 import os
 import numpy as np
 import fnmatch
@@ -1334,7 +1335,6 @@ class Simulator:
                 
             # Modify ONLY allowed fields
             
-            
             idx = self.__orders_container__.index(order)
 
             updated_order = order._replace(
@@ -1752,3 +1752,12 @@ class Simulator:
             # ----- Remove pending order after successful execution -----
             if result and result.get("retcode") == self.mt5_instance.TRADE_RETCODE_DONE:
                 self.__orders_container__.remove(order)
+
+    def __Tester__(self):
+        
+        if not self.IS_TESTER:
+            return
+        
+    def OnTick(self, tick: namedtuple):
+        
+        
