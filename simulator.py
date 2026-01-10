@@ -22,11 +22,28 @@ if config.is_debug:
         suppress=True,     # disable scientific notation
     )
 
-class Simulator:
+class Tester:
     def __init__(self, simulator_name: str, mt5_instance: mt5, deposit: float, leverage: str="1:100"):
+        """MetaTrader 5-Like Strategy tester for the MetaTrader5-Python module.
+
+        Args:
+            simulator_name (str): A Bot or Simulator's name
+            mt5_instance (mt5): An instance of the Initialized MetaTrader 5 module
+            deposit (float): The initial account balance for the Tester
+            leverage (_type_, optional): A leverage of the simulated account. Defaults to "1:100".
+
+        Raises:
+            RuntimeError: When one of the operation fails
+        """
         
         self.mt5_instance = mt5_instance
         self.simulator_name = simulator_name
+        
+        config.tester_logger = config.get_logger(self.simulator_name, 
+                                                 logfile=os.path.join(config.MT5_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
+        
+        config.simulator_logger = config.get_logger(self.simulator_name, 
+                                                    logfile=os.path.join(config.ESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
         
         self.deviation_points = None
         self.filling_type = None
@@ -1752,12 +1769,85 @@ class Simulator:
             # ----- Remove pending order after successful execution -----
             if result and result.get("retcode") == self.mt5_instance.TRADE_RETCODE_DONE:
                 self.__orders_container__.remove(order)
+    
+    def __Init() -> bool:
+        """A function for Initializing the simulator in either tester mode or MetaTrader 5 mode
 
-    def __Tester__(self):
-        
+        Returns:
+            bool: True for success False for failure
+        """
+                
+    def OnTick(self, ontick_func):
+
         if not self.IS_TESTER:
             return
+
+        start_date = datetime(2025, 12, 1)
+        end_date   = datetime(2025, 12, 31)
+        symbols    = ["EURUSD", "USDCAD"]
+
+        self.__GetLogger().info("Tester Initializing")
+
+        import ticks
         
-    def OnTick(self, tick: namedtuple):
+        TESTER_ALL_TICKS_INFO = []
+        for symbol in symbols:
+            
+            ticks_obtained = ticks.fetch_historical_ticks(start_datetime=start_date, end_datetime=end_date, symbol=symbol)
+            
+            ticks_info = {
+                "symbol": symbol,
+                "ticks": ticks_obtained,
+                "size": ticks_obtained.height,
+                "counter": 0
+            }
+            
+            TESTER_ALL_TICKS_INFO.append(ticks_info)
+            
+
+        self.__GetLogger().info("Initialized")
+
+        # --- Run until ALL symbols exhaust ticks ---
         
+        maximum_n_ticks = max([ticks_info["size"] for ticks_info in TESTER_ALL_TICKS_INFO])
+        self.__GetLogger().debug(f"maximum number of ticks: {maximum_n_ticks}")
         
+        while True:
+            
+            for i in range(len(symbols)):
+                
+                ticks_info = TESTER_ALL_TICKS_INFO[i]
+                symbol = ticks_info["symbol"]
+                size = ticks_info["size"]
+                counter = ticks_info["counter"]
+                
+                self.__GetLogger().debug(f"{symbol} Tick[{ticks_info['counter']}/{size}]")
+                
+                if counter > size:
+                    continue
+                
+                if size > maximum_n_ticks:
+                    break # stop the tester
+                
+                current_tick = ticks_info["ticks"].row(counter)
+                
+                self.TickUpdate(symbol=symbol, tick=current_tick)
+                ontick_func()
+                
+                ticks_info["counter"] = counter+1
+
+
+# The ontick function will be called afterwards by the user without them having to worry about updating ticks to the simulator
+
+if __name__ == "__main__":
+    
+    mt5.initialize()
+    
+    sim = Tester("MYEA", deposit=1000, mt5_instance=mt5)
+
+    def ontick_function():
+        
+        print("some trading actions")
+        # exit()
+
+    sim.OnTick(ontick_function)

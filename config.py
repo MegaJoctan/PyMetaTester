@@ -59,10 +59,10 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
 
 logging_level = logging.DEBUG if is_debug else logging.INFO
 
-TESTER_LOGS_DIR = os.path.join(LOGS_DIR, "Tester")
-os.makedirs(TESTER_LOGS_DIR, exist_ok=True)
-tester_logger = get_logger("tester", logfile=os.path.join(TESTER_LOGS_DIR, f"{LOG_DATE}.log"), level=logging_level)
+MT5_LOGS_DIR = os.path.join(LOGS_DIR, "MT5")
+os.makedirs(MT5_LOGS_DIR, exist_ok=True)
+tester_logger = None
 
-SIMULATOR_LOGS_DIR = os.path.join(LOGS_DIR, "Simulator")
-os.makedirs(SIMULATOR_LOGS_DIR, exist_ok=True)
-simulator_logger = get_logger("simulator", logfile=os.path.join(SIMULATOR_LOGS_DIR, f"{LOG_DATE}.log"), level=logging_level)
+TESTER_LOGS_DIR = os.path.join(LOGS_DIR, "Simulator")
+os.makedirs(TESTER_LOGS_DIR, exist_ok=True)
+simulator_logger = None
