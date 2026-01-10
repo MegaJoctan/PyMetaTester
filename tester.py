@@ -1,5 +1,4 @@
 import MetaTrader5 as mt5
-from Trade.SymbolInfo import CSymbolInfo
 import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
@@ -13,8 +12,12 @@ from collections import namedtuple
 import polars as pl
 import utils
 import config
-from validators import TradeValidators
+from validators import TradeValidators, TesterConfigValidators
 import sys
+import ticks
+import bars
+import json
+from tqdm import tqdm
 
 if config.is_debug:
     np.set_printoptions(
@@ -22,32 +25,82 @@ if config.is_debug:
     )
 
 class Tester:
-    def __init__(self, simulator_name: str, mt5_instance: mt5, deposit: float, leverage: str="1:100"):
+    def __init__(self, tester_config: dict, mt5_instance: mt5):
         """MetaTrader 5-Like Strategy tester for the MetaTrader5-Python module.
 
         Args:
-            simulator_name (str): A Bot or Simulator's name
-            mt5_instance (mt5): An instance of the Initialized MetaTrader 5 module
-            deposit (float): The initial account balance for the Tester
-            leverage (_type_, optional): A leverage of the simulated account. Defaults to "1:100".
-
+            configs_json (dict): a dictonary containing tester configurations
         Raises:
             RuntimeError: When one of the operation fails
         """
         
+        # ---------------- validate all configs from a dictionary -----------------
+        
+        self.tester_config = TesterConfigValidators.parse_tester_configs(tester_config)
+        
+        # -------------------- initialize the Loggers ----------------------------
+        
         self.mt5_instance = mt5_instance
-        self.simulator_name = simulator_name
+        self.simulator_name = self.tester_config["bot_name"]
         
         config.mt5_logger = config.get_logger(self.simulator_name+".mt5", 
                                                  logfile=os.path.join(config.MT5_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
         
         config.tester_logger = config.get_logger(self.simulator_name+".tester", 
                                                     logfile=os.path.join(config.TESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
+
+        # -------------- Check if we are not on the tester mode ------------------
         
-        self.deviation_points = None
-        self.filling_type = None
-        self.id = 0
-        self.m_symbol = CSymbolInfo(self.mt5_instance)
+        self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
+        
+        if not self.IS_TESTER:
+            self.__GetLogger().debug("MT5 mode")
+            
+        # --------------- initialize ticks or bars data ----------------------------
+        
+        self.__GetLogger().info("Tester Initializing")
+        
+        self.TESTER_ALL_TICKS_INFO = []
+        self.TESTER_ALL_BARS_INFO = []
+        
+        start_dt = self.tester_config["start_date"]
+        end_dt = self.tester_config["end_date"]
+        
+        for symbol in self.tester_config["symbols"]:
+            
+            modelling = self.tester_config["modelling"]
+            if modelling == "real_ticks":
+                    
+                ticks_obtained = ticks.fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol=symbol)
+                
+                ticks_info = {
+                    "symbol": symbol,
+                    "ticks": ticks_obtained,
+                    "size": ticks_obtained.height,
+                    "counter": 0
+                }
+                
+                self.TESTER_ALL_TICKS_INFO.append(ticks_info)
+            
+            elif modelling == "new_bar":
+                
+                bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
+                                                           timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]],
+                                                           start_datetime=start_dt,
+                                                           end_datetime=end_dt)
+                
+                bars_info = {
+                    "symbol": symbol,
+                    "bars": bars_obtained,
+                    "size": bars_obtained.height,
+                    "counter": 0
+                }
+                
+                print("symbol: ",symbol, " bars received: ",bars_obtained.height)
+                
+                self.TESTER_ALL_BARS_INFO.append(bars_info)
+                
+        self.__GetLogger().info("Initialized")
         
         # ----------------- TradeOrder --------------------------
         
@@ -181,12 +234,14 @@ class Tester:
         if mt5_acc_info is None:
             raise RuntimeError("Failed to obtain MT5 account info")
 
+        deposit = self.tester_config["deposit"]
+        
         self.__account_state_update(
             account_info=self.AccountInfo(
                 # ---- identity / broker-controlled ----
                 login=11223344,
                 trade_mode=mt5_acc_info.trade_mode,
-                leverage=int(leverage.split(":")[1]),
+                leverage=int(self.tester_config["leverage"]),
                 limit_orders=mt5_acc_info.limit_orders,
                 margin_so_mode=mt5_acc_info.margin_so_mode,
                 trade_allowed=mt5_acc_info.trade_allowed,
@@ -222,12 +277,6 @@ class Tester:
                 company=mt5_acc_info.company,
             )
         )
-
-        self.IS_RUNNING = True # is the simulator running or stopped 
-        self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
-        
-        if not self.IS_TESTER:
-            self.__GetLogger().debug("MT5 mode")
         
         self.symbol_info_cache: dict[str, namedtuple] = {}
         self.tick_cache: dict[str, namedtuple] = {}
@@ -259,7 +308,7 @@ class Tester:
             self.mt5_instance.ORDER_TYPE_SELL_STOP,
             self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
         }
-        
+    
     def __account_state_update(self, account_info: namedtuple):
         
         self.AccountInfo = account_info
@@ -1613,13 +1662,13 @@ class Tester:
                                                    volume=pos.volume,
                                                    price=pos.price)
             
-        self.AccountInfo(
+        self.AccountInfo._replace(
             profit=unrealized_pl,
             equity=self.AccountInfo.balance + unrealized_pl,
             margin=total_margin
         )
         
-        self.AccountInfo(
+        self.AccountInfo._replace(
             margin_free=self.AccountInfo.equity - self.AccountInfo.margin,
             margin_level=self.AccountInfo.equity / self.AccountInfo.margin * 100 if self.AccountInfo.margin > 0 else 0
         )
@@ -1772,84 +1821,130 @@ class Tester:
             if result and result.get("retcode") == self.mt5_instance.TRADE_RETCODE_DONE:
                 self.__orders_container__.remove(order)
     
-    def __Init() -> bool:
-        """A function for Initializing the simulator in either tester mode or MetaTrader 5 mode
-
-        Returns:
-            bool: True for success False for failure
+    def _bar_to_tick(self, symbol, bar):
         """
-                
-    def OnTick(self, ontick_func):
+            Creates a synthetic tick from a bar (MT5-style).
+            Uses OPEN price.
+        """
 
+        price = bar["open"] if isinstance(bar, dict) else bar[1]
+
+        return {
+            "time": bar["time"] if isinstance(bar, dict) else bar[0],
+            "bid": price,
+            "ask": price + self.symbol_info(symbol).spread,
+            "last": price,
+            "volume": 0,
+            "flags": 0,
+        }
+
+    def OnTick(self, ontick_func):
+        """Calls the assigned function upon the receival of new tick(s)
+
+        Args:
+            ontick_func (_type_): A function to be called on every tick
+        """
+        
         if not self.IS_TESTER:
             return
 
-        start_date = datetime(2025, 12, 1)
-        end_date   = datetime(2025, 12, 31)
-        symbols    = ["EURUSD", "USDCAD"]
-
-        self.__GetLogger().info("Tester Initializing")
-
-        import ticks
-        
-        TESTER_ALL_TICKS_INFO = []
-        for symbol in symbols:
+        modelling = self.tester_config["modelling"]
+        if modelling == "real_ticks":
             
-            ticks_obtained = ticks.fetch_historical_ticks(start_datetime=start_date, end_datetime=end_date, symbol=symbol)
-            
-            ticks_info = {
-                "symbol": symbol,
-                "ticks": ticks_obtained,
-                "size": ticks_obtained.height,
-                "counter": 0
-            }
-            
-            TESTER_ALL_TICKS_INFO.append(ticks_info)
-            
+            total_ticks = sum(ticks_info["size"] for ticks_info in self.TESTER_ALL_TICKS_INFO)
 
-        self.__GetLogger().info("Initialized")
+            self.__GetLogger().debug(f"total number of ticks: {total_ticks}")
 
-        # --- Run until ALL symbols exhaust ticks ---
-        
-        maximum_n_ticks = max([ticks_info["size"] for ticks_info in TESTER_ALL_TICKS_INFO])
-        self.__GetLogger().debug(f"maximum number of ticks: {maximum_n_ticks}")
-        
-        while True:
+            with tqdm(total=total_ticks, desc="Tester Progress", unit="tick") as pbar:
+                while True:
+                    
+                    self.__account_monitoring()
+                    self.__positions_monitoring()
+                    self.__pending_orders_monitoring()
+                    
+                    any_tick_processed = False
+
+                    for ticks_info in self.TESTER_ALL_TICKS_INFO:
+
+                        symbol = ticks_info["symbol"]
+                        size = ticks_info["size"]
+                        counter = ticks_info["counter"]
+
+                        if counter >= size:
+                            continue
+
+                        current_tick = ticks_info["ticks"].row(counter)
+
+                        self.TickUpdate(symbol=symbol, tick=current_tick)
+                        ontick_func()
+
+                        ticks_info["counter"] = counter + 1
+                        any_tick_processed = True
+
+                        pbar.update(1)
+
+                    if not any_tick_processed:
+                        break
+                    
+        elif modelling == "new_bar":
             
-            for i in range(len(symbols)):
-                
-                ticks_info = TESTER_ALL_TICKS_INFO[i]
-                symbol = ticks_info["symbol"]
-                size = ticks_info["size"]
-                counter = ticks_info["counter"]
-                
-                # self.__GetLogger().debug(f"{symbol} Tick[{ticks_info['counter']}/{size}]")
-                
-                if counter > size:
-                    continue
-                
-                if size > maximum_n_ticks:
-                    break # stop the tester
-                
-                current_tick = ticks_info["ticks"].row(counter)
-                
-                self.TickUpdate(symbol=symbol, tick=current_tick)
-                ontick_func()
-                
-                ticks_info["counter"] = counter+1
+            bars_ = [bars_info["size"] for bars_info in self.TESTER_ALL_BARS_INFO]
+            total_bars = sum(bars_)
+            
+            self.__GetLogger().debug(f"total number of bars: {total_bars}")
 
+            with tqdm(total=total_bars, desc="Tester Progress", unit="bar") as pbar:
+                while True:
+                    
+                    self.__account_monitoring()
+                    self.__positions_monitoring()
+                    self.__pending_orders_monitoring()
+                    
+                    any_bar_processed = False
 
+                    for bars_info in self.TESTER_ALL_BARS_INFO:
+
+                        symbol = bars_info["symbol"]
+                        size = bars_info["size"]
+                        counter = bars_info["counter"]
+
+                        if counter >= size:
+                            continue
+
+                        current_tick = self._bar_to_tick(symbol=symbol, bar=bars_info["bars"].row(counter))
+                        
+                        # how can I get tick at the current bar???
+                        
+                        self.TickUpdate(symbol=symbol, tick=current_tick)
+                        ontick_func()
+
+                        bars_info["counter"] = counter + 1
+                        any_bar_processed = True
+
+                        pbar.update(1)
+
+                    if not any_bar_processed:
+                        break
+            
+                        
 # The ontick function will be called afterwards by the user without them having to worry about updating ticks to the simulator
 
 if __name__ == "__main__":
     
     mt5.initialize()
     
-    sim = Tester("MYEA", deposit=1000, mt5_instance=mt5)
+    try:
+        with open(os.path.join('configs/tester.json'), 'r', encoding='utf-8') as file:
+            # Deserialize the file data into a Python object
+            data = json.load(file)
+    except Exception as e:
+        raise RuntimeError(e)
+
+    sim = Tester(tester_config=data["tester"], mt5_instance=mt5)
 
     def ontick_function():
-        
-        print("some trading actions")
+        pass
+        # print("some trading actions")
         # exit()
 
     sim.OnTick(ontick_function)
