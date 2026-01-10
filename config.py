@@ -61,8 +61,8 @@ logging_level = logging.DEBUG if is_debug else logging.INFO
 
 MT5_LOGS_DIR = os.path.join(LOGS_DIR, "MT5")
 os.makedirs(MT5_LOGS_DIR, exist_ok=True)
-tester_logger = None
+mt5_logger = None
 
-TESTER_LOGS_DIR = os.path.join(LOGS_DIR, "Simulator")
+TESTER_LOGS_DIR = os.path.join(LOGS_DIR, "Tester")
 os.makedirs(TESTER_LOGS_DIR, exist_ok=True)
-simulator_logger = None
+tester_logger = None

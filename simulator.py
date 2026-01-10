@@ -14,7 +14,6 @@ import polars as pl
 import utils
 import config
 from validators import TradeValidators
-from Trade.Trade import CTrade
 import sys
 
 if config.is_debug:
@@ -39,11 +38,11 @@ class Tester:
         self.mt5_instance = mt5_instance
         self.simulator_name = simulator_name
         
-        config.tester_logger = config.get_logger(self.simulator_name, 
+        config.mt5_logger = config.get_logger(self.simulator_name+".mt5", 
                                                  logfile=os.path.join(config.MT5_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
         
-        config.simulator_logger = config.get_logger(self.simulator_name, 
-                                                    logfile=os.path.join(config.ESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
+        config.tester_logger = config.get_logger(self.simulator_name+".tester", 
+                                                    logfile=os.path.join(config.TESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
         
         self.deviation_points = None
         self.filling_type = None
@@ -227,6 +226,9 @@ class Tester:
         self.IS_RUNNING = True # is the simulator running or stopped 
         self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
         
+        if not self.IS_TESTER:
+            self.__GetLogger().debug("MT5 mode")
+        
         self.symbol_info_cache: dict[str, namedtuple] = {}
         self.tick_cache: dict[str, namedtuple] = {}
         
@@ -388,7 +390,7 @@ class Tester:
         if self.IS_TESTER:
             return config.tester_logger
         
-        return config.simulator_logger
+        return config.mt5_logger
     
     def copy_rates_from_pos(self, symbol: str, timeframe: int, start_pos: int, count: int) -> np.array:
         
@@ -1821,7 +1823,7 @@ class Tester:
                 size = ticks_info["size"]
                 counter = ticks_info["counter"]
                 
-                self.__GetLogger().debug(f"{symbol} Tick[{ticks_info['counter']}/{size}]")
+                # self.__GetLogger().debug(f"{symbol} Tick[{ticks_info['counter']}/{size}]")
                 
                 if counter > size:
                     continue
