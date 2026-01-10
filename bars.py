@@ -21,7 +21,7 @@ def bars_to_polars(bars):
 def fetch_historical_bars(symbol: str, 
                           timeframe: int,
                           start_datetime: datetime,
-                          end_datetime: datetime):
+                          end_datetime: datetime) -> pl.DataFrame:
     """
     Fetch historical bar data for a given symbol and timeframe, forward in time.
     Saves data to a single Parquet file in append mode.
@@ -47,7 +47,7 @@ def fetch_historical_bars(symbol: str,
         if month_start > end_datetime:
             break
 
-        print(f"Processing {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        print(f"Processing bars for {symbol} : {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
         # --- fetch data here ---
         rates = mt5.copy_rates_range(
@@ -58,7 +58,7 @@ def fetch_historical_bars(symbol: str,
         )
 
         if rates is None and len(rates)==0:
-            config.simulator_logger.warning(f"Failed to Get bars from MetaTrader5")
+            config.tester_logger.warning(f"Failed to Get bars from MetaTrader5")
             current = (month_start + timedelta(days=32)).replace(day=1) # Advance to next month safely
             continue
             
@@ -86,6 +86,8 @@ def fetch_historical_bars(symbol: str,
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
 
+    return df
+    
 """
 if __name__ == "__main__":
     
@@ -95,7 +97,7 @@ if __name__ == "__main__":
         quit()
     
     start_date = datetime(2022, 1, 1, tzinfo=timezone.utc)
-    end_date = datetime(2025, 1, 10, tzinfo=timezone.utc)
+    end_date = datetime.now(tz=timezone.utc)
     
     fetch_historical_bars("XAUUSD", mt5.TIMEFRAME_M1, start_date, end_date)
     fetch_historical_bars("EURUSD", mt5.TIMEFRAME_H1, start_date, end_date)
