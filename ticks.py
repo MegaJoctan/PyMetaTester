@@ -19,12 +19,15 @@ def ticks_to_polars(ticks):
     
 def fetch_historical_ticks(start_datetime: datetime, 
                            end_datetime: datetime,
-                           symbol: str):
+                           symbol: str) -> pl.DataFrame:
 
     # first of all we have to ensure the symbol is valid and can be used for requesting data
     if not utils.ensure_symbol(symbol=symbol):
         print(f"Symbol {symbol} not available")
         return
+    
+    start_datetime = utils.ensure_utc(start_datetime)
+    end_datetime = utils.ensure_utc(end_datetime)
     
     current = start_datetime.replace(day=1, hour=0, minute=0, second=0)
 
@@ -42,7 +45,7 @@ def fetch_historical_ticks(start_datetime: datetime,
         if month_start > end_datetime:
             break
 
-        print(f"Processing ticks {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        print(f"Processing ticks for {symbol} : {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
         # --- fetch data here ---
         ticks = mt5.copy_ticks_range(
@@ -54,7 +57,7 @@ def fetch_historical_ticks(start_datetime: datetime,
 
         if ticks is None or len(ticks) == 0:
             
-            config.simulator_logger.critical(f"Failed to Get ticks. Error = {mt5.last_error()}")
+            config.tester_logger.critical(f"Failed to Get ticks. Error = {mt5.last_error()}")
             current = (month_start + timedelta(days=32)).replace(day=1) # Advance to next month safely
             
             continue
@@ -81,6 +84,8 @@ def fetch_historical_ticks(start_datetime: datetime,
         
         # Advance to next month safely
         current = (month_start + timedelta(days=32)).replace(day=1)
+    
+    return df
         
 """
 if __name__ == "__main__":
