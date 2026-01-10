@@ -17,39 +17,39 @@ def bars_to_polars(bars):
         "spread": bars["spread"],
         "real_volume": bars["real_volume"],
     })
-    
-def fetch_historical_bars(symbol: str, 
+
+def fetch_historical_bars(symbol: str,
                           timeframe: int,
                           start_datetime: datetime,
                           end_datetime: datetime) -> pl.DataFrame:
-    """
-    Fetch historical bar data for a given symbol and timeframe, forward in time.
-    Saves data to a single Parquet file in append mode.
-    """
-    
+
     if not utils.ensure_symbol(symbol=symbol):
-        print(f"Symbol {symbol} not available")
-        return
-    
+        config.tester_logger.warning(f"Symbol {symbol} not available")
+        return pl.DataFrame()
+
+    start_datetime = utils.ensure_utc(start_datetime)
+    end_datetime   = utils.ensure_utc(end_datetime)
+
     current = start_datetime.replace(day=1, hour=0, minute=0, second=0)
+
+    dfs: list[pl.DataFrame] = []
+
+    tf_name = utils.TIMEFRAMES_REV[timeframe]
 
     while True:
         month_start, month_end = utils.month_bounds(current)
 
-        # Cap last month to end_date
         if (
             month_start.year == end_datetime.year and
             month_start.month == end_datetime.month
         ):
             month_end = end_datetime
 
-        # Stop condition
         if month_start > end_datetime:
             break
 
-        print(f"Processing bars for {symbol} : {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        config.tester_logger.warning(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
-        # --- fetch data here ---
         rates = mt5.copy_rates_range(
             symbol,
             timeframe,
@@ -57,37 +57,42 @@ def fetch_historical_bars(symbol: str,
             month_end
         )
 
-        if rates is None and len(rates)==0:
-            config.tester_logger.warning(f"Failed to Get bars from MetaTrader5")
-            current = (month_start + timedelta(days=32)).replace(day=1) # Advance to next month safely
+        if rates is None:
+            config.tester_logger.warning(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
+            current = (month_start + timedelta(days=32)).replace(day=1)
             continue
-            
+
         df = bars_to_polars(rates)
 
-        df = df.with_columns([
-            pl.from_epoch("time", time_unit="s").dt.replace_time_zone("utc").alias("time")
-        ])
+        df = df.with_columns(
+            pl.from_epoch("time", time_unit="s")
+              .dt.replace_time_zone("utc")
+              .alias("time")
+        )
 
         df = df.with_columns([
             pl.col("time").dt.year().alias("year"),
             pl.col("time").dt.month().alias("month"),
         ])
-        
-        tf_name = utils.TIMEFRAMES_REV[timeframe]
+
         df.write_parquet(
             os.path.join(config.BARS_HISTORY_DIR, symbol, tf_name),
             partition_by=["year", "month"],
             mkdir=True
         )
-
-        if config.is_debug:
-            print(df.head(-10))
+        
+        # if config.is_debug: 
+        #     print(df.head(-10))
             
-        # Advance to next month safely
+        dfs.append(df)
+
         current = (month_start + timedelta(days=32)).replace(day=1)
 
-    return df
-    
+    if not dfs:
+        return pl.DataFrame()
+
+    return pl.concat(dfs, how="vertical")
+
 """
 if __name__ == "__main__":
     
