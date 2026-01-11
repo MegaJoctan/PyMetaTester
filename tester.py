@@ -36,7 +36,8 @@ class Tester:
         """
         
         self.symbol_info_cache: dict[str, namedtuple] = {}
-        self.tick_cache: dict[str, namedtuple] = {}
+        
+        self.tick_cache: dict[str, utils.Tick] = {}
         
         # ---------------- validate all configs from a dictionary -----------------
         
@@ -88,7 +89,7 @@ class Tester:
                 
                 self.TESTER_ALL_TICKS_INFO.append(ticks_info)
             
-            elif modelling == "new_bar" or modelling == "1-minute-OHLC":
+            elif modelling == "new_bar":
                 
                 bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
                                                         timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]],
@@ -104,13 +105,32 @@ class Tester:
                 
                 self.TESTER_ALL_BARS_INFO.append(bars_info)
             
+            elif modelling == "1-minute-ohlc":
+                
+                bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
+                                                        timeframe=utils.TIMEFRAMES["M1"],
+                                                        start_datetime=start_dt,
+                                                        end_datetime=end_dt)
+                
+                bars_info = {
+                    "symbol": symbol,
+                    "bars": bars_obtained,
+                    "size": bars_obtained.height,
+                    "counter": 0
+                }
+                
+                self.TESTER_ALL_BARS_INFO.append(bars_info)
+            
             elif modelling == "every_tick":
                 
                 bars_df = bars.fetch_historical_bars(symbol=symbol, 
-                                                    timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]], 
+                                                    timeframe=utils.TIMEFRAMES["M1"], 
                                                     start_datetime=start_dt, end_datetime=end_dt)
                 
-                ticks_obtained = TicksGen.generate_ticks_from_bars(bars=bars_df, symbol_point=self.symbol_info(symbol).point)
+                ticks_obtained = TicksGen.generate_ticks_from_bars(bars=bars_df, symbol=symbol, 
+                                                                symbol_point=self.symbol_info(symbol).point,
+                                                                out_dir=f"{config.SIMULATED_TICKS_DIR}/{symbol}", 
+                                                                return_df=True)
                 
                 ticks_info = {
                     "symbol": symbol,
@@ -378,7 +398,20 @@ class Tester:
             
         return tick
     
-    def TickUpdate(self, symbol: str, tick: namedtuple):
+    def TickUpdate(self, symbol: str, tick: any):
+        """Updates ticks in the Tester/Simulator
+
+        Args:
+            symbol (str): An instrument for such a tick
+            tick (any): Either a dictionary or a custom tick type named Tick from utils.Tick
+        """
+        
+        if not isinstance(tick, utils.Tick) and not isinstance(tick, dict):
+            self.__GetLogger().critical("Failed to update ticks, Invalid type received. It can either be a Tick or dict datatypes")
+            
+        if isinstance(tick, dict):
+            tick = utils.make_tick_from_dict(tick)
+        
         self.tick_cache[symbol] = tick
     
     def __mt5_data_to_dicts(self, rates) -> list[dict]:
@@ -1207,7 +1240,7 @@ class Tester:
                         price=price,
                         commission=self.__calc_commission(),
                         swap=0,
-                        profit=0,
+                        profit=pos.profit,
                         fee=0,
                         symbol=symbol,
                         comment=request.get("comment", ""),
@@ -1215,6 +1248,8 @@ class Tester:
                     )
                 )
 
+                self.__GetLogger().info(f"Position: {ticket} closed!")
+                
                 return {
                     "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
                     "deal": deal_ticket,
@@ -1297,6 +1332,8 @@ class Tester:
                 )
             )
             
+            self.__GetLogger().info(f"Position: {position_ticket} opened!")
+                
             return {
                 "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
                 "deal": deal_ticket,
@@ -1351,6 +1388,8 @@ class Tester:
             self.__orders_container__.append(order) 
             self.__orders_history_container__.append(order)
             
+            self.__GetLogger().info(f"Pending order: {order_ticket} placed!")
+                
             return {
                 "retcode": self.mt5_instance.TRADE_RETCODE_DONE,
                 "order": order_ticket,
@@ -1398,6 +1437,8 @@ class Tester:
 
             self.__positions_container__[idx] = updated_pos
 
+            self.__GetLogger().info(f"Position: {ticket} Modified!")
+                
             return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
         
             
@@ -1436,6 +1477,8 @@ class Tester:
 
             self.__orders_container__[idx] = updated_order
             
+            self.__GetLogger().info(f"Pending Order: {ticket} Modified!")
+                
             return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
         
         elif action == self.mt5_instance.TRADE_ACTION_REMOVE:
@@ -1446,6 +1489,8 @@ class Tester:
                 o for o in self.__orders_container__ if o.ticket != ticket
             ]
             
+            self.__GetLogger().info(f"Pending order: {ticket} removed!")
+                
             return {"retcode": self.mt5_instance.TRADE_RETCODE_DONE}
 
         return {
@@ -1681,7 +1726,7 @@ class Tester:
             total_margin += self.order_calc_margin(order_type=pos.type, 
                                                    symbol=pos.symbol,
                                                    volume=pos.volume,
-                                                   price=pos.price)
+                                                   price=pos.price_current)
             
         self.AccountInfo._replace(
             profit=unrealized_pl,
@@ -1718,12 +1763,15 @@ class Tester:
                 continue
 
             # --- Update floating profit ---
-            pos.profit = self.order_calc_profit(
+            
+            pos._replace(
+                profit = self.order_calc_profit(
                 order_type=pos.type,
                 symbol=pos.symbol,
                 volume=pos.volume,
                 price_open=pos.price_open,
                 price_close=price
+                )
             )
 
             # --- Check SL / TP ---
@@ -1913,7 +1961,7 @@ class Tester:
                     if not any_tick_processed:
                         break
                     
-        elif modelling == "new_bar":
+        elif modelling == "new_bar" or modelling == "1-minute-ohlc":
             
             bars_ = [bars_info["size"] for bars_info in self.TESTER_ALL_BARS_INFO]
             total_bars = sum(bars_)
@@ -1940,7 +1988,7 @@ class Tester:
 
                         current_tick = self._bar_to_tick(symbol=symbol, bar=bars_info["bars"].row(counter))
                         
-                        # how can I get tick at the current bar???
+                        # Getting ticks at the current bar
                         
                         self.TickUpdate(symbol=symbol, tick=current_tick)
                         ontick_func()
@@ -1952,7 +2000,6 @@ class Tester:
 
                     if not any_bar_processed:
                         break
-            
                         
 # The ontick function will be called afterwards by the user without them having to worry about updating ticks to the simulator
 
@@ -1961,7 +2008,7 @@ if __name__ == "__main__":
     mt5.initialize()
     
     try:
-        with open(os.path.join('configs/tester.json'), 'r', encoding='utf-8') as file:
+        with open(os.path.join('configs/tester.json'), 'r', encoding='utf-8') as file: # reading a JSON file
             # Deserialize the file data into a Python object
             data = json.load(file)
     except Exception as e:
