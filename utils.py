@@ -2,6 +2,7 @@ import sys
 import MetaTrader5 as mt5
 from calendar import monthrange
 from datetime import datetime, timezone
+from collections import namedtuple
 
 def ensure_symbol(symbol: str) -> bool:
     info = mt5.symbol_info(symbol)
@@ -95,3 +96,79 @@ def ensure_utc(dt: datetime) -> datetime:
 
     # Aware → convert to UTC if needed
     return dt.astimezone(timezone.utc)
+
+Tick = namedtuple(
+    "Tick",
+    [
+        "time",
+        "bid",
+        "ask",
+        "last",
+        "volume",
+        "time_msc",
+        "flags",
+        "volume_real",
+    ]
+)
+
+def make_tick(
+    time: datetime,
+    bid: float,
+    ask: float,
+    last: float = 0.0,
+    volume: int = 0,
+    time_msc: int = 0,
+    flags: int = -1,
+    volume_real: float = 0.0,
+    ) -> Tick:
+
+    # MT5 semantics
+    time  = ensure_utc(time)
+
+    if time_msc == 0:
+        if isinstance(time, datetime):
+            time_msc = time.timestamp()
+                
+    time_sec = int(time.timestamp())
+    time_msc = int(time.timestamp() * 1000)
+
+    return Tick(
+        time=time_sec,
+        bid=float(bid),
+        ask=float(ask),
+        last=float(bid if last==0 else last),
+        volume=int(volume),
+        time_msc=time_msc,
+        flags=int(flags),
+        volume_real=int(volume_real),
+    )
+
+def make_tick_from_dict(data: dict) -> Tick:
+    """
+    Convert a dict into a Tick namedtuple.
+    Accepts MT5-like, Polars, or JSON tick dictionaries.
+    """
+
+    # --- time handling ---
+    time = data.get("time")
+
+    if isinstance(time, (int, float)):
+        # epoch seconds
+        time = datetime.fromtimestamp(time, tz=timezone.utc)
+
+    elif isinstance(time, datetime):
+        time = ensure_utc(time)
+
+    else:
+        raise ValueError("Tick dictionary must contain a valid 'time' field")
+
+    return make_tick(
+        time=time,
+        bid=data.get("bid", 0.0),
+        ask=data.get("ask", 0.0),
+        last=data.get("last", 0.0),
+        volume=data.get("volume", 0),
+        time_msc=data.get("time_msc", 0),
+        flags=data.get("flags", -1),
+        volume_real=data.get("volume_real", 0.0),
+    )
