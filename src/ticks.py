@@ -50,7 +50,7 @@ def fetch_historical_ticks(start_datetime: datetime,
         if config.tester_logger is None:
             print(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         else:
-            config.tester_logger.warning(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+            config.tester_logger.info(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
         ticks = mt5.copy_ticks_range(
             symbol,

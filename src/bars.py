@@ -56,7 +56,7 @@ def fetch_historical_bars(symbol: str,
         if config.tester_logger is None:
             print(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         else:
-            config.tester_logger.warning(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+            config.tester_logger.info(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         
 
         rates = mt5.copy_rates_range(
