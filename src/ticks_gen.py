@@ -3,6 +3,7 @@ import datetime
 import polars as pl
 import os
 import config
+import utils
 
 class TicksGen:
     def __init__(self):
@@ -13,31 +14,6 @@ class TicksGen:
         if steps <= 1:
             return [end]
         return np.linspace(start, end, steps).tolist()
-    
-    @staticmethod
-    def __tick__(time: datetime, 
-             bid: float,
-             ask: float,
-             time_msc: int=0,
-             last: float=0,
-             volume: int=0,
-             volume_real: int=0,
-             flags: int=-1) -> dict:
-        
-        if time_msc == 0:
-            if isinstance(time, datetime):
-                time_msc = time.timestamp()
-        
-        return {
-                    "time": time,
-                    "bid": bid,
-                    "ask": ask,
-                    "last": bid if last==0 else last,
-                    "volume": volume,
-                    "time_msc": time_msc,
-                    "flags": flags,
-                    "volume_real": volume_real,
-                }
     
     def build_support_points(bar: dict) -> list:
         o, h, l, c = bar["open"], bar["high"], bar["low"], bar["close"]
@@ -66,19 +42,19 @@ class TicksGen:
         if tick_count == 1:
             price = bar["close"]
             return [
-                TicksGen.__tick__(
+                utils.make_tick(
                     bar["time"],
                     price,
                     price + spread * symbol_point,
-                    base_msc
+                    time_msc=base_msc
                 )
             ]
 
         # ----- 2 ticks ----
         if tick_count == 2:
             return [
-                TicksGen.__tick__(bar["time"], bar["open"], bar["open"] + spread * symbol_point, base_msc),
-                TicksGen.__tick__(bar["time"], bar["close"], bar["close"] + spread * symbol_point, base_msc + step),
+                utils.make_tick(bar["time"], bar["open"], bar["open"] + spread * symbol_point, time_msc=base_msc),
+                utils.make_tick(bar["time"], bar["close"], bar["close"] + spread * symbol_point, time_msc=base_msc + step),
             ]
 
         # ---- Support points ----
@@ -96,11 +72,11 @@ class TicksGen:
             prices = TicksGen.interpolate_prices(start, end, steps)
             for price in prices:
                 ticks.append(
-                    TicksGen.__tick__(
-                        bar["time"],
-                        float(price),
-                        float(price + spread * symbol_point),
-                        base_msc + t_index * step
+                    utils.make_tick(
+                        time=bar["time"],
+                        bid=float(price),
+                        ask=float(price + spread * symbol_point),
+                        time_msc=base_msc + t_index * step
                     )
                 )
                 t_index += 1
