@@ -68,7 +68,7 @@ os.makedirs(TESTER_LOGS_DIR, exist_ok=True)
 tester_logger = None
 
 SUPPORTED_TESTER_MODELLING = {
-                "every_ticks",
+                "every_tick",
                 "real_ticks",
                 "new_bar",
                 "1-minute-OHLC"
