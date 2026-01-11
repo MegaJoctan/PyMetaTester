@@ -14,8 +14,9 @@ import utils
 import config
 from validators import TradeValidators, TesterConfigValidators
 import sys
-import ticks
-import bars
+from src import ticks
+from src import bars
+from src.ticks_gen import TicksGen
 import json
 from tqdm import tqdm
 
@@ -34,6 +35,9 @@ class Tester:
             RuntimeError: When one of the operation fails
         """
         
+        self.symbol_info_cache: dict[str, namedtuple] = {}
+        self.tick_cache: dict[str, namedtuple] = {}
+        
         # ---------------- validate all configs from a dictionary -----------------
         
         self.tester_config = TesterConfigValidators.parse_tester_configs(tester_config)
@@ -44,10 +48,10 @@ class Tester:
         self.simulator_name = self.tester_config["bot_name"]
         
         config.mt5_logger = config.get_logger(self.simulator_name+".mt5", 
-                                                 logfile=os.path.join(config.MT5_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
+                                            logfile=os.path.join(config.MT5_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
         
         config.tester_logger = config.get_logger(self.simulator_name+".tester", 
-                                                    logfile=os.path.join(config.TESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
+                                                logfile=os.path.join(config.TESTER_LOGS_DIR, f"{config.LOG_DATE}.log"), level=config.logging_level)
 
         # -------------- Check if we are not on the tester mode ------------------
         
@@ -59,16 +63,18 @@ class Tester:
         # --------------- initialize ticks or bars data ----------------------------
         
         self.__GetLogger().info("Tester Initializing")
+        self.__GetLogger().info(f"Tester configs: {self.tester_config}")
         
-        self.TESTER_ALL_TICKS_INFO = []
-        self.TESTER_ALL_BARS_INFO = []
+        self.TESTER_ALL_TICKS_INFO = [] # for storing all ticks to be used during the test
+        self.TESTER_ALL_BARS_INFO = [] # for storing all bars to be used during the test
         
         start_dt = self.tester_config["start_date"]
         end_dt = self.tester_config["end_date"]
         
+        modelling = self.tester_config["modelling"]
+        
         for symbol in self.tester_config["symbols"]:
             
-            modelling = self.tester_config["modelling"]
             if modelling == "real_ticks":
                     
                 ticks_obtained = ticks.fetch_historical_ticks(start_datetime=start_dt, end_datetime=end_dt, symbol=symbol)
@@ -82,12 +88,12 @@ class Tester:
                 
                 self.TESTER_ALL_TICKS_INFO.append(ticks_info)
             
-            elif modelling == "new_bar":
+            elif modelling == "new_bar" or modelling == "1-minute-OHLC":
                 
                 bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
-                                                           timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]],
-                                                           start_datetime=start_dt,
-                                                           end_datetime=end_dt)
+                                                        timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]],
+                                                        start_datetime=start_dt,
+                                                        end_datetime=end_dt)
                 
                 bars_info = {
                     "symbol": symbol,
@@ -96,9 +102,24 @@ class Tester:
                     "counter": 0
                 }
                 
-                print("symbol: ",symbol, " bars received: ",bars_obtained.height)
-                
                 self.TESTER_ALL_BARS_INFO.append(bars_info)
+            
+            elif modelling == "every_tick":
+                
+                bars_df = bars.fetch_historical_bars(symbol=symbol, 
+                                                    timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]], 
+                                                    start_datetime=start_dt, end_datetime=end_dt)
+                
+                ticks_obtained = TicksGen.generate_ticks_from_bars(bars=bars_df, symbol_point=self.symbol_info(symbol).point)
+                
+                ticks_info = {
+                    "symbol": symbol,
+                    "ticks": ticks_obtained,
+                    "size": ticks_obtained.height,
+                    "counter": 0
+                }
+                
+                self.TESTER_ALL_TICKS_INFO.append(ticks_info)
                 
         self.__GetLogger().info("Initialized")
         
@@ -1828,14 +1849,20 @@ class Tester:
         """
 
         price = bar["open"] if isinstance(bar, dict) else bar[1]
-
+        time = bar["time"] if isinstance(bar, dict) else bar[0]
+        spread = bar["spread"] if isinstance(bar, dict) else bar[6]
+        tv = bar["tick_volume"] if isinstance(bar, dict) else bar[5]
+        
         return {
-            "time": bar["time"] if isinstance(bar, dict) else bar[0],
+            
+            "time": time,
             "bid": price,
-            "ask": price + self.symbol_info(symbol).spread,
+            "ask": price + spread * self.symbol_info(symbol).point,
             "last": price,
-            "volume": 0,
+            "volume": tv,
+            "time_msc": time.timestamp(),
             "flags": 0,
+            "volume_real": 0,
         }
 
     def OnTick(self, ontick_func):
@@ -1849,7 +1876,7 @@ class Tester:
             return
 
         modelling = self.tester_config["modelling"]
-        if modelling == "real_ticks":
+        if modelling == "real_ticks" or modelling == "every_tick":
             
             total_ticks = sum(ticks_info["size"] for ticks_info in self.TESTER_ALL_TICKS_INFO)
 
