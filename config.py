@@ -66,3 +66,21 @@ mt5_logger = None
 TESTER_LOGS_DIR = os.path.join(LOGS_DIR, "Tester")
 os.makedirs(TESTER_LOGS_DIR, exist_ok=True)
 tester_logger = None
+
+SUPPORTED_TESTER_MODELLING = {
+                "every_ticks",
+                "real_ticks",
+                "new_bar",
+                "1-minute-OHLC"
+                }
+
+REQUIRED_TESTER_CONFIG_KEYS = {
+            "bot_name",
+            "symbols",
+            "timeframe",
+            "start_date",
+            "end_date",
+            "modelling",
+            "deposit",
+            "leverage",
+        }

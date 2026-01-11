@@ -3,6 +3,7 @@ import MetaTrader5 as mt5
 from typing import Dict
 from datetime import datetime
 import utils
+import config
 
 class TradeValidators:
     def __init__(self, 
@@ -295,17 +296,8 @@ class TesterConfigValidators:
     
     @staticmethod
     def _validate_keys(raw_config: Dict) -> None:
-        required_keys = {
-            "bot_name",
-            "symbols",
-            "timeframe",
-            "start_date",
-            "end_date",
-            "modelling",
-            "deposit",
-            "leverage",
-        }
-
+        
+        required_keys = config.REQUIRED_TESTER_CONFIG_KEYS
         provided_keys = set(raw_config.keys())
 
         missing = required_keys - provided_keys
@@ -356,15 +348,9 @@ class TesterConfigValidators:
         # --- MODELLING ---
         modelling = raw_config["modelling"].lower()
         
-        VALID_MODELLING = {
-                        "every_ticks",
-                        "real_ticks",
-                        "new_bar",
-                        "1-minute-OHLC"
-                        }
+        if modelling not in config.SUPPORTED_TESTER_MODELLING:
+            raise RuntimeError(f"Invalid modelling mode: {modelling}, supported modellings include: {config.SUPPORTED_TESTER_MODELLING}")
         
-        if modelling not in VALID_MODELLING:
-            raise RuntimeError(f"Invalid modelling mode: {modelling}")
         cfg["modelling"] = modelling
 
         # --- DATE PARSING ---
