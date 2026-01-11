@@ -355,7 +355,14 @@ class TesterConfigValidators:
 
         # --- MODELLING ---
         modelling = raw_config["modelling"].lower()
-        VALID_MODELLING = {"real_ticks", "new_bar"}
+        
+        VALID_MODELLING = {
+                        "every_ticks",
+                        "real_ticks",
+                        "new_bar",
+                        "1-minute-OHLC"
+                        }
+        
         if modelling not in VALID_MODELLING:
             raise RuntimeError(f"Invalid modelling mode: {modelling}")
         cfg["modelling"] = modelling
