@@ -17,6 +17,7 @@ def bars_to_polars(bars):
         "spread": bars["spread"],
         "real_volume": bars["real_volume"],
     })
+        
 
 def fetch_historical_bars(symbol: str,
                           timeframe: int,
@@ -24,7 +25,11 @@ def fetch_historical_bars(symbol: str,
                           end_datetime: datetime) -> pl.DataFrame:
 
     if not utils.ensure_symbol(symbol=symbol):
-        config.tester_logger.warning(f"Symbol {symbol} not available")
+        
+        if config.tester_logger is None:
+            print(f"Symbol {symbol} not available")
+        else:
+            config.tester_logger.warning(f"Symbol {symbol} not available")
         return pl.DataFrame()
 
     start_datetime = utils.ensure_utc(start_datetime)
@@ -48,7 +53,11 @@ def fetch_historical_bars(symbol: str,
         if month_start > end_datetime:
             break
 
-        config.tester_logger.warning(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        if config.tester_logger is None:
+            print(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        else:
+            config.tester_logger.warning(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        
 
         rates = mt5.copy_rates_range(
             symbol,
@@ -58,7 +67,12 @@ def fetch_historical_bars(symbol: str,
         )
 
         if rates is None:
-            config.tester_logger.warning(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
+            
+            if config.tester_logger is None:
+                print(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
+            else:
+                config.tester_logger.warning(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
+                
             current = (month_start + timedelta(days=32)).replace(day=1)
             continue
 

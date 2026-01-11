@@ -22,7 +22,10 @@ def fetch_historical_ticks(start_datetime: datetime,
                         symbol: str) -> pl.DataFrame:
 
     if not utils.ensure_symbol(symbol=symbol):
-        config.tester_logger.warning(f"Symbol {symbol} not available")
+        if config.tester_logger is None:
+            print(f"Symbol {symbol} not available")
+        else:
+            config.tester_logger.warning(f"Symbol {symbol} not available")
         return pl.DataFrame()
 
     start_datetime = utils.ensure_utc(start_datetime)
@@ -43,8 +46,11 @@ def fetch_historical_ticks(start_datetime: datetime,
 
         if month_start > end_datetime:
             break
-
-        config.tester_logger.warning(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        
+        if config.tester_logger is None:
+            print(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+        else:
+            config.tester_logger.warning(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
         ticks = mt5.copy_ticks_range(
             symbol,
@@ -54,9 +60,12 @@ def fetch_historical_ticks(start_datetime: datetime,
         )
 
         if ticks is None or len(ticks) == 0:
-            config.tester_logger.warning(
-                f"No ticks for {symbol} {month_start:%Y-%m}"
-            )
+            
+            if config.tester_logger is None:
+                print(f"No ticks for {symbol} {month_start:%Y-%m}")
+            else:
+                config.tester_logger.warning(f"No ticks for {symbol} {month_start:%Y-%m}")
+                
             current = (month_start + timedelta(days=32)).replace(day=1)
             continue
 
