@@ -12,6 +12,8 @@ TICKS_HISTORY_DIR = os.path.join(HISTORY_DIR, "Ticks")
 
 SIMULATED_TICKS_DIR = os.path.join(HISTORY_DIR, "Simulated", "Ticks")
 
+CONFIGS_DIR = "Configs"
+
 # logger configurations
 
 LOGS_DIR = "Logs"
