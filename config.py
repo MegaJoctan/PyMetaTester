@@ -10,6 +10,8 @@ HISTORY_DIR = "History"  # Folder name for storing history data
 BARS_HISTORY_DIR = os.path.join(HISTORY_DIR, "Bars")
 TICKS_HISTORY_DIR = os.path.join(HISTORY_DIR, "Ticks")
 
+SIMULATED_TICKS_DIR = os.path.join(HISTORY_DIR, "Simulated", "Ticks")
+
 # logger configurations
 
 LOGS_DIR = "Logs"
