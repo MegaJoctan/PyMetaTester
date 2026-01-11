@@ -73,7 +73,7 @@ SUPPORTED_TESTER_MODELLING = {
                 "every_tick",
                 "real_ticks",
                 "new_bar",
-                "1-minute-OHLC"
+                "1-minute-ohlc"
                 }
 
 REQUIRED_TESTER_CONFIG_KEYS = {
