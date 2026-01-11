@@ -20,9 +20,9 @@ def bars_to_polars(bars):
         
 
 def fetch_historical_bars(symbol: str,
-                          timeframe: int,
-                          start_datetime: datetime,
-                          end_datetime: datetime) -> pl.DataFrame:
+                        timeframe: int,
+                        start_datetime: datetime,
+                        end_datetime: datetime) -> pl.DataFrame:
 
     if not utils.ensure_symbol(symbol=symbol):
         

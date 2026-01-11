@@ -1,6 +1,8 @@
 import numpy as np
 import datetime
 import polars as pl
+import os
+import config
 
 class TicksGen:
     def __init__(self):
@@ -106,41 +108,75 @@ class TicksGen:
         return ticks[:tick_count]
 
     @staticmethod
-    def generate_ticks_from_bars(bars: pl.DataFrame, symbol_point) -> pl.DataFrame:
-        """
-        Converts M1 bars into a full tick stream
-        """
-        
-        ticks_df = pl.DataFrame(
-            schema={
-                "time": pl.Datetime("us", time_zone="UTC"),
-                "bid": pl.Float64,
-                "ask": pl.Float64,
-                "last": pl.Float64,
-                "volume": pl.UInt64,
-                "time_msc": pl.Int64,
-                "flags": pl.Int8,
-                "volume_real": pl.UInt64,
-            }
-        )
-            
-        for bar in bars.iter_rows(named=True):
-            ticks = TicksGen.generate_ticks_from_bar(bar, symbol_point)
+    def generate_ticks_from_bars(
+        bars: pl.DataFrame,
+        symbol: str,
+        symbol_point: float,
+        out_dir: str,
+        return_df: bool = False,
+    ) -> pl.DataFrame:
 
-            if not ticks:
+        dfs: list[pl.DataFrame] = []
+
+        # Ensure sorted (important!)
+        bars = bars.sort("time")
+
+        # Add year/month once
+        bars = bars.with_columns([
+            pl.col("time").dt.year().alias("year"),
+            pl.col("time").dt.month().alias("month"),
+        ])
+
+        for (year, month), bars_chunk in bars.group_by(["year", "month"], maintain_order=True):
+
+            if config.tester_logger is None:
+                print(f"Generating ticks for {symbol}: {year}-{month:02d}")
+            else:
+                config.tester_logger.info(f"Generating ticks for {symbol}: {year}-{month:02d}")
+
+            tick_rows = []
+
+            for bar in bars_chunk.iter_rows(named=True):
+                ticks = TicksGen.generate_ticks_from_bar(bar, symbol_point)
+                if ticks:
+                    tick_rows.extend(ticks)
+
+            if not tick_rows:
                 continue
-            
-            tick_chunk = pl.DataFrame(ticks).with_columns([
-                pl.col("bid").cast(pl.Float64),
-                pl.col("ask").cast(pl.Float64),
-                pl.col("last").cast(pl.Float64),
-                pl.col("volume").cast(pl.UInt64),
-                pl.col("volume_real").cast(pl.UInt64),
-                pl.col("time_msc").cast(pl.Int64),
-                pl.col("flags").cast(pl.Int8),
-            ])
 
-            ticks_df.vstack(tick_chunk, in_place=True)
+            df = (
+                pl.DataFrame(
+                    tick_rows,
+                    schema={
+                        "time": pl.Datetime("us", time_zone="UTC"),
+                        "bid": pl.Float64,
+                        "ask": pl.Float64,
+                        "last": pl.Float64,
+                        "volume": pl.UInt64,
+                        "time_msc": pl.Int64,
+                        "flags": pl.Int8,
+                        "volume_real": pl.UInt64,
+                    },
+                )
+                .with_columns([
+                    pl.col("time").dt.year().alias("year"),
+                    pl.col("time").dt.month().alias("month"),
+                ])
+            )
 
-        return ticks_df
+            # Write monthly partition
+            df.write_parquet(
+                os.path.join(out_dir, symbol),
+                partition_by=["year", "month"],
+                mkdir=True,
+            )
+
+            if return_df:
+                dfs.append(df)
+
+        if return_df and dfs:
+            return pl.concat(dfs, how="vertical")
+
+        return pl.DataFrame()
+
 
