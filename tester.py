@@ -3,7 +3,6 @@ import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
 import time
-import pytz
 import os
 import numpy as np
 import fnmatch
@@ -17,8 +16,8 @@ import sys
 from src import ticks
 from src import bars
 from src.ticks_gen import TicksGen
-import json
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 if config.is_debug:
     np.set_printoptions(
@@ -351,6 +350,52 @@ class Tester:
             self.mt5_instance.ORDER_TYPE_SELL_STOP,
             self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
         }
+        
+        # -------------------- tester reports ----------------------------
+        
+        self.last_curve_minute = -1
+        
+        self.tester_curves = {
+            "time": [],
+            "balance": [],
+            "equity": [],
+            "margin": []
+        }
+        
+        self.tester_stats = {
+            "Net Profit": 0,
+            "Gross Profit": 0,
+            "Gross Loss": 0,
+
+            "Profit Factor": 0,
+            "Expected Payoff": 0,
+            "Recovery Factor": 0,
+
+            "Balance DD Absolute": 0,
+            "Equity DD Absolute": 0,
+            "Equity DD Relative": 0,
+
+            "Total Trades": 0,
+            "Profit Trades %": 0,
+            "Largest Profit Trade": 0,
+            "Largest Loss Trade": 0,
+
+            "Sharpe Ratio": 0,
+        }
+        
+    def __curves_update(self, time):
+        
+        minute = int(time.timestamp()) // (config.CURVES_PLOT_INTERVAL_MINS*60)
+
+        if minute == self.last_curve_minute:
+            return
+
+        self.last_curve_minute = minute
+
+        self.tester_curves["time"].append(time)
+        self.tester_curves["balance"].append(self.AccountInfo.balance)
+        self.tester_curves["equity"].append(self.AccountInfo.equity)
+        self.tester_curves["margin"].append(self.AccountInfo.margin)
     
     def __account_state_update(self, account_info: namedtuple):
         
@@ -1784,17 +1829,17 @@ class Tester:
             
             unrealized_pl += pos.profit
             total_margin += self.order_calc_margin(order_type=pos.type, 
-                                                   symbol=pos.symbol,
-                                                   volume=pos.volume,
-                                                   price=pos.price_current)
+                                                symbol=pos.symbol,
+                                                volume=pos.volume,
+                                                price=pos.price_current)
             
-        self.AccountInfo._replace(
+        self.AccountInfo = self.AccountInfo._replace(
             profit=unrealized_pl,
             equity=self.AccountInfo.balance + unrealized_pl,
             margin=total_margin
         )
         
-        self.AccountInfo._replace(
+        self.AccountInfo = self.AccountInfo._replace(
             margin_free=self.AccountInfo.equity - self.AccountInfo.margin,
             margin_level=self.AccountInfo.equity / self.AccountInfo.margin * 100 if self.AccountInfo.margin > 0 else 0
         )
@@ -2023,6 +2068,8 @@ class Tester:
                             continue
 
                         current_tick = ticks_info["ticks"].row(counter)
+                        
+                        self.__curves_update(current_tick["time"])
 
                         self.TickUpdate(symbol=symbol, tick=current_tick)
                         ontick_func()
@@ -2061,6 +2108,8 @@ class Tester:
                             continue
 
                         current_tick = self._bar_to_tick(symbol=symbol, bar=bars_info["bars"].row(counter))
+                        
+                        self.__curves_update(current_tick["time"])
                         
                         # Getting ticks at the current bar
                         
@@ -2117,8 +2166,37 @@ class Tester:
         # )
         
         # generate a report at the end
+        
         self.__GenerateTesterReport(output_file=f"Reports/{self.tester_config['bot_name']}-report.html")
     
+    def _plot_tester_curves(self, output_path: str) -> str:
+        
+        curves = self.tester_curves
+
+        if not curves["time"]:
+            return None
+
+        # Convert timestamps → datetime
+        times = [
+            datetime.fromtimestamp(t) if isinstance(t, (int, float)) else t
+            for t in curves["time"]
+        ]
+
+        plt.figure(figsize=(10, 4))
+
+        plt.plot(times, curves["balance"], label="Balance", linewidth=2)
+        plt.plot(times, curves["equity"], label="Equity", linewidth=2)
+        plt.grid(visible=True, which="minor")
+        # plt.plot(times, curves["margin"], label="Margin", linewidth=1, alpha=0.6)
+
+        plt.legend()
+        plt.tight_layout()
+
+        plt.savefig(output_path, dpi=150, transparent=True)
+        plt.close()
+
+        return output_path
+
     def __GenerateTesterReport(self, output_file="Tester report.html"):
         
         def render_order_rows(orders):
@@ -2166,18 +2244,29 @@ class Tester:
                 """)
 
             return "\n".join(rows)
+                
+        curve_img = self._plot_tester_curves(output_path=os.path.join(
+            config.TESTER_REPORTS_IMAGE_PATH, 
+            f"{self.tester_config['bot_name'].replace(' ', '_')}_curve.png"))
 
-
-        with open("Reports/template.html", "r", encoding="utf-8") as f:
+        curve_img = curve_img.replace(config.TESTER_REPORTS_PATH+'\\', "")
+        
+        with open(os.path.join(config.TESTER_REPORTS_PATH, "template.html"), "r", encoding="utf-8") as f:
             template = f.read()
 
         order_rows_html = render_order_rows(self.__orders_history_container__)
         deal_rows_html = render_deal_rows(self.__deals_history_container__)
-
+        
+        # we populate table's body
+        
         html = (
             template
             .replace("{{ORDER_ROWS}}", order_rows_html)
             .replace("{{DEAL_ROWS}}", deal_rows_html)
+            .replace(
+            "{{CURVE_IMAGE}}",
+            f'<img src="{curve_img}" class="img-fluid curve-img">' if curve_img else ""
+    )
         )
 
         with open(output_file, "w", encoding="utf-8") as f:
