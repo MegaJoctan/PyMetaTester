@@ -25,8 +25,8 @@ symbol = "EURUSD"
 timeframe = "PERIOD_H1"
 magic_number = 10012026
 slippage = 100
-sl = 500
-tp = 700
+sl = 1000
+tp = 100
 
 # ---------------------------------------------------------
 
