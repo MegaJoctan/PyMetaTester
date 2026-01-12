@@ -172,3 +172,55 @@ def make_tick_from_dict(data: dict) -> Tick:
         flags=data.get("flags", -1),
         volume_real=data.get("volume_real", 0.0),
     )
+
+
+DEAL_TYPE_MAP = {
+    mt5.DEAL_TYPE_BUY: "BUY",
+    mt5.DEAL_TYPE_SELL: "SELL",
+    mt5.DEAL_TYPE_BALANCE: "BALANCE",
+    mt5.DEAL_TYPE_CREDIT: "CREDIT",
+    mt5.DEAL_TYPE_CHARGE: "CHARGE",
+    mt5.DEAL_TYPE_CORRECTION: "CORRECTION",
+    mt5.DEAL_TYPE_BONUS: "BONUS",
+    mt5.DEAL_TYPE_COMMISSION: "COMMISSION",
+    mt5.DEAL_TYPE_COMMISSION_DAILY: "COMMISSION DAILY",
+    mt5.DEAL_TYPE_COMMISSION_MONTHLY: "COMMISSION MONTHLY",
+    mt5.DEAL_TYPE_COMMISSION_AGENT_DAILY: "AGENT COMMISSION DAILY",
+    mt5.DEAL_TYPE_COMMISSION_AGENT_MONTHLY: "AGENT COMMISSION MONTHLY",
+    mt5.DEAL_TYPE_INTEREST: "INTEREST",
+    mt5.DEAL_TYPE_BUY_CANCELED: "BUY CANCELED",
+    mt5.DEAL_TYPE_SELL_CANCELED: "SELL CANCELED"
+}
+
+
+DEAL_ENTRY_MAP = {
+    mt5.DEAL_ENTRY_IN: "IN",
+    mt5.DEAL_ENTRY_OUT: "OUT",
+    mt5.DEAL_ENTRY_INOUT: "INOUT"
+}
+
+ORDER_TYPE_MAP = {
+    mt5.ORDER_TYPE_BUY: "Market Buy order",
+    mt5.ORDER_TYPE_SELL: "Market Sell order",
+    mt5.ORDER_TYPE_BUY_LIMIT: "Buy Limit pending order",
+    mt5.ORDER_TYPE_SELL_LIMIT: "Sell Limit pending order",
+    mt5.ORDER_TYPE_BUY_STOP: "Buy Stop pending order",
+    mt5.ORDER_TYPE_SELL_STOP: "Sell Stop pending order",
+    mt5.ORDER_TYPE_BUY_STOP_LIMIT: "Upon reaching the order price, a pending Buy Limit order is placed at the StopLimit price",
+    mt5.ORDER_TYPE_SELL_STOP_LIMIT: "Upon reaching the order price, a pending Sell Limit order is placed at the StopLimit price",
+    mt5.ORDER_TYPE_CLOSE_BY: "Order to close a position by an opposite one"
+}
+
+
+ORDER_STATE_MAP = {            
+    mt5.ORDER_STATE_STARTED: "Order checked, but not yet accepted by broker",
+    mt5.ORDER_STATE_PLACED: "Order accepted",
+    mt5.ORDER_STATE_CANCELED: "Order canceled by client",
+    mt5.ORDER_STATE_PARTIAL: "Order partially executed",
+    mt5.ORDER_STATE_FILLED: "Order fully executed",
+    mt5.ORDER_STATE_REJECTED: "Order rejected",
+    mt5.ORDER_STATE_EXPIRED: "Order expired",
+    mt5.ORDER_STATE_REQUEST_ADD: "Order is being registered (placing to the trading system)",
+    mt5.ORDER_STATE_REQUEST_MODIFY: "Order is being modified (changing its parameters)",
+    mt5.ORDER_STATE_REQUEST_CANCEL: "Order is being deleted (deleting from the trading system)"
+}
