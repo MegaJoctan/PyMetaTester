@@ -9,72 +9,167 @@
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
         rel="stylesheet"
     >
-    
+
     <style>
+        :root {
+            --bg: #ffffff;
+            --border: #dee2e6;
+            --header-bg: #f3f4f6;
+            --text: #212529;
+            --muted: #6c757d;
+        }
+
         body {
-            background: #f8f9fa;
+            background: var(--bg);
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            font-size: 11px;
+            color: var(--text);
+            line-height: 1.35;
+        }
+
+        /* Page width */
+        .page-wrapper {
+            margin: 24px 10%;
         }
 
         h4 {
-            font-size: 14px;
-            text-align: center;
-            margin: 16px 0 10px;
+            font-size: 13px;
             font-weight: 600;
+            text-align: center;
+            margin: 22px 0 10px;
         }
 
-        .report-table {
-            width: 80%;
-            margin: auto;
-            background: white;
+        .muted {
+            color: var(--muted);
+            font-size: 10px;
+        }
+
+        /* Sections are logical only – no visual boxes */
+        .section {
+            margin-bottom: 18px;
+        }
+
+        /* Unified report table style */
+        table {
+            width: 100%;
             border-collapse: collapse;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-size: 10px;
         }
 
-        .report-table th, .report-table td {
-            padding: 8px 12px;
-            border: 1px solid #dee2e6;
+        th, td {
+            padding: 4px 6px;
+            border: 1px solid var(--border);
             text-align: center;
+            vertical-align: middle;
+            white-space: nowrap;
         }
 
-        .report-table th {
-            background-color: #f1f3f5;
+        th {
+            background: var(--header-bg);
             font-weight: 600;
         }
 
-        .report-table td.number {
+        td.number {
             text-align: right;
-            font-family: monospace;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
 
-        .table-wrapper {
-            margin: 0 20%; /* 10% space left and right */
+        /* Stats table slightly larger */
+        .report-table th,
+        .report-table td {
+            font-size: 11px;
+            padding: 6px 8px;
         }
 
-        .table {
-            font-size: 10px;
-            width: 100%; /* fill the wrapper */
-            background: white;
-            border-collapse: collapse;
-        }
-
-        .table th {
-            text-align: center;
-            font-size: 10px;
-        }
-
-        .table td {
-            font-size: 10px;
-        }
-        
+        /* Curve */
         .curve-wrapper {
             display: flex;
             justify-content: center;
-            margin: 20px 0 30px;
+            margin: 12px 0 16px;
         }
 
         .curve-img {
-            max-width: 55%;
-            padding: 10px;
+            max-width: 60%;
+        }
+
+        /* Clean Bootstrap interference */
+        .table-striped > tbody > tr:nth-of-type(odd) {
+            background-color: #fafafa;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+        
+        /* ---------- Responsive Scaling ---------- */
+
+        /* Page width adapts */
+        .page-wrapper {
+            margin: clamp(12px, 20vw, 20%);
+        }
+
+        /* Global font scales with viewport */
+        body {
+            font-size: clamp(9px, 0.75vw, 11px);
+        }
+
+        /* Headers scale gently */
+        h4 {
+            font-size: clamp(11px, 1vw, 13px);
+        }
+
+        /* Table font & spacing scale */
+        table {
+            font-size: clamp(8px, 0.7vw, 10px);
+        }
+
+        th, td {
+            padding: clamp(2px, 0.4vw, 6px);
+        }
+
+        /* Stats table slightly larger */
+        .report-table th,
+        .report-table td {
+            font-size: clamp(9px, 0.8vw, 11px);
+        }
+
+        /* Curve responsiveness */
+        .curve-img {
+            max-width: 100%;
+            width: clamp(280px, 60vw, 900px);
+            height: auto;
+        }
+
+        /* Allow horizontal scroll ONLY if needed */
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Reduce whitespace on small screens */
+        @media (max-width: 900px) {
+            h4 {
+                margin: 16px 0 8px;
+            }
+
+            .section {
+                margin-bottom: 12px;
+            }
+        }
+
+        /* Extreme small screens (last resort) */
+        @media (max-width: 600px) {
+            .page-wrapper {
+                margin: 8px;
+            }
+
+            table {
+                font-size: 8px;
+            }
+
+            th, td {
+                padding: 2px 3px;
+            }
         }
 
     </style>
@@ -82,22 +177,25 @@
 </head>
 <body>
 
-<h4 class="mt-4 text-center">Strategy Tester Report<br>Python-Simulator</b></h4>
+<div class="page-wrapper">
 
+    <h4>Strategy Tester Report<br><span class="muted">Python Simulator</span></h4>
 
-<h4 class="mt-4 text-center">Stats</h4>
+    <h4>Stats</h4>
+    <div class="section">
+        {{STATS_TABLE}}
+    </div>
 
-{{STATS_TABLE}}
+    <div class="section">
+        <div class="curve-wrapper">
+            {{CURVE_IMAGE}}
+        </div>
+    </div>
 
-<div class="curve-wrapper">
-    {{CURVE_IMAGE}}
-</div>
-
-<h4 class="mt-4 text-center">Orders</h4>
-<div class="table-wrapper">
-    <div class="table-responsive">
+    <h4>Orders</h4>
+    <div class="section table-responsive">
         <table class="table table-sm table-striped align-middle">
-            <thead class="table-light text-center">
+            <thead>
                 <tr>
                     <th>Open Time</th>
                     <th>Order</th>
@@ -117,26 +215,24 @@
             </tbody>
         </table>
     </div>
-</div>
 
-<h4 class="mb-3 text-center">Deals</h4>
-<div class="table-wrapper">
-    <div class="table-responsive">
-        <table class="table table-sm table-striped table-bordered align-middle">
-            <thead class="table-light text-center">
+    <h4>Deals</h4>
+    <div class="section table-responsive">
+        <table class="table table-sm table-striped align-middle">
+            <thead>
                 <tr>
                     <th>Time</th>
                     <th>Deal</th>
                     <th>Symbol</th>
                     <th>Type</th>
                     <th>Entry</th>
-                    <th>Volume</th>
-                    <th>Price</th>
-                    <th>Commission</th>
-                    <th>Swap</th>
-                    <th>Profit</th>
+                    <th class="number">Volume</th>
+                    <th class="number">Price</th>
+                    <th class="number">Commission</th>
+                    <th class="number">Swap</th>
+                    <th class="number">Profit</th>
                     <th>Comment</th>
-                    <th>Balance</th>
+                    <th class="number">Balance</th>
                 </tr>
             </thead>
             <tbody>
@@ -144,6 +240,7 @@
             </tbody>
         </table>
     </div>
+
 </div>
 
 </body>
