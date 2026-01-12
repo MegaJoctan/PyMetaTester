@@ -172,6 +172,46 @@ def make_tick_from_dict(data: dict) -> Tick:
         flags=data.get("flags", -1),
         volume_real=data.get("volume_real", 0.0),
     )
+    
+def make_tick_from_tuple(data: tuple) -> Tick:
+    """
+    Convert a tuple-based tick into a Tick namedtuple.
+    Extra fields at the end of the tuple are ignored.
+    """
+
+    if len(data) < 8:
+        raise ValueError("Tick tuple must contain at least 8 elements")
+
+    (
+        time,
+        bid,
+        ask,
+        last,
+        volume,
+        time_msc,
+        flags,
+        volume_real,
+        *_
+    ) = data
+
+    # --- time handling ---
+    if isinstance(time, (int, float)):
+        time = datetime.fromtimestamp(time, tz=timezone.utc)
+    elif isinstance(time, datetime):
+        time = ensure_utc(time)
+    else:
+        raise ValueError("Invalid time field in tick tuple")
+
+    return make_tick(
+        time=time,
+        bid=bid,
+        ask=ask,
+        last=last,
+        volume=volume,
+        time_msc=time_msc,
+        flags=flags,
+        volume_real=volume_real,
+    )
 
 
 DEAL_TYPE_MAP = {
