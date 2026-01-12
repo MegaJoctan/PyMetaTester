@@ -88,3 +88,11 @@ REQUIRED_TESTER_CONFIG_KEYS = {
             "deposit",
             "leverage",
         }
+
+CURVES_PLOT_INTERVAL_MINS = 1
+
+TESTER_REPORTS_PATH = "Reports"
+os.makedirs(TESTER_REPORTS_PATH, exist_ok=True)
+
+TESTER_REPORTS_IMAGE_PATH = os.path.join(TESTER_REPORTS_PATH, "Images")
+os.makedirs(TESTER_REPORTS_IMAGE_PATH, exist_ok=True)
