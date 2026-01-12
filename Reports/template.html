@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Strategy Tester</title>
+    <title>Strategy Tester Report</title>
 
     <!-- Bootstrap 5 -->
     <link
@@ -22,50 +22,91 @@
             font-weight: 600;
         }
 
-        .tester-container {
-            max-width: 1200px;
+        .report-table {
+            width: 80%;
             margin: auto;
+            background: white;
+            border-collapse: collapse;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .report-table th, .report-table td {
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            text-align: center;
+        }
+
+        .report-table th {
+            background-color: #f1f3f5;
+            font-weight: 600;
+        }
+
+        .report-table td.number {
+            text-align: right;
+            font-family: monospace;
         }
 
         .table-wrapper {
-            margin: 0 10%; /* 10% space left and right */
+            margin: 0 20%; /* 10% space left and right */
         }
 
         .table {
             font-size: 10px;
             width: 100%; /* fill the wrapper */
             background: white;
+            border-collapse: collapse;
         }
 
         .table th {
-            white-space: nowrap;
             text-align: center;
             font-size: 10px;
         }
 
         .table td {
-            white-space: nowrap;
             font-size: 10px;
         }
+        
+        .curve-wrapper {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0 30px;
+        }
+
+        .curve-img {
+            max-width: 55%;
+            padding: 10px;
+        }
+
     </style>
 
 </head>
 <body>
 
+<h4 class="mt-4 text-center">Strategy Tester Report<br>Python-Simulator</b></h4>
+
+
+<h4 class="mt-4 text-center">Stats</h4>
+
+{{STATS_TABLE}}
+
+<div class="curve-wrapper">
+    {{CURVE_IMAGE}}
+</div>
+
 <h4 class="mt-4 text-center">Orders</h4>
 <div class="table-wrapper">
     <div class="table-responsive">
-        <table class="table table-sm table-striped table-bordered align-middle">
+        <table class="table table-sm table-striped align-middle">
             <thead class="table-light text-center">
                 <tr>
                     <th>Open Time</th>
                     <th>Order</th>
                     <th>Symbol</th>
                     <th>Type</th>
-                    <th class="text-end">Volume</th>
-                    <th class="text-end">Price</th>
-                    <th class="text-end">S / L</th>
-                    <th class="text-end">T / P</th>
+                    <th class="number">Volume</th>
+                    <th class="number">Price</th>
+                    <th class="number">S / L</th>
+                    <th class="number">T / P</th>
                     <th>Time</th>
                     <th>State</th>
                     <th>Comment</th>

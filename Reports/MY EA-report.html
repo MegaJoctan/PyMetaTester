@@ -22,13 +22,9 @@
             font-weight: 600;
         }
 
-        .tester-container {
-            max-width: 1200px;
-            margin: auto;
-        }
 
         .table-wrapper {
-            margin: 0 10%; /* 10% space left and right */
+            margin: 0 20%; /* 10% space left and right */
         }
 
         .table {
@@ -38,24 +34,44 @@
         }
 
         .table th {
-            white-space: nowrap;
             text-align: center;
             font-size: 10px;
         }
 
         .table td {
-            white-space: nowrap;
             font-size: 10px;
+            font-family: monospace;
         }
+        
+        .curve-wrapper {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0 30px;
+        }
+
+        .curve-img {
+            max-width: 55%;
+            padding: 10px;
+        }
+
     </style>
 
 </head>
 <body>
 
+<h4 class="mt-4 text-center">Strategy Tester Report<br>Python-Simulator</b></h4>
+
+
+<h4 class="mt-4 text-center">Stats</h4>
+
+<div class="curve-wrapper">
+    <img src="Images\MY_EA_curve.png" class="img-fluid curve-img">
+</div>
+
 <h4 class="mt-4 text-center">Orders</h4>
 <div class="table-wrapper">
     <div class="table-responsive">
-        <table class="table table-sm table-striped table-bordered align-middle">
+        <table class="table table-sm table-striped align-middle">
             <thead class="table-light text-center">
                 <tr>
                     <th>Open Time</th>
