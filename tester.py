@@ -18,6 +18,11 @@ from src import bars
 from src.ticks_gen import TicksGen
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+mpl.rcParams["agg.path.chunksize"] = 10000
+mpl.rcParams["path.simplify"] = True
+mpl.rcParams["path.simplify_threshold"] = 0.1
 
 if config.is_debug:
     np.set_printoptions(
@@ -366,7 +371,10 @@ class Tester:
         
     def __curves_update(self, time):
         
-        minute = int(time.timestamp()) // (config.CURVES_PLOT_INTERVAL_MINS*60)
+        if isinstance(time, datetime):
+            time = time.timestamp()
+        
+        minute = int(time) // (config.CURVES_PLOT_INTERVAL_MINS*60)
 
         if minute == self.last_curve_minute:
             return
@@ -434,11 +442,14 @@ class Tester:
             tick (any): Either a dictionary or a custom tick type named Tick from utils.Tick
         """
         
-        if not isinstance(tick, utils.Tick) and not isinstance(tick, dict):
-            self.__GetLogger().critical("Failed to update ticks, Invalid type received. It can either be a Tick or dict datatypes")
+        if not isinstance(tick, utils.Tick) and not isinstance(tick, dict) and not isinstance(tick, tuple):
+            self.__GetLogger().critical("Failed to update ticks, Invalid type received. It can either be a Tick, dict, or tuple datatypes")
             
         if isinstance(tick, dict):
             tick = utils.make_tick_from_dict(tick)
+        
+        if isinstance(tick, tuple):
+            tick = utils.make_tick_from_tuple(tick)
         
         self.tick_cache[symbol] = tick
     
@@ -2050,9 +2061,10 @@ class Tester:
 
                         current_tick = ticks_info["ticks"].row(counter)
                         
-                        self.__curves_update(current_tick["time"])
-
+                        current_tick = utils.make_tick_from_tuple(current_tick)
                         self.TickUpdate(symbol=symbol, tick=current_tick)
+                        
+                        self.__curves_update(current_tick.time)
                         ontick_func()
 
                         ticks_info["counter"] = counter + 1
@@ -2174,14 +2186,25 @@ class Tester:
         short_trades_won = 0
         long_trades_won = 0
         
+        total_short_trades = 0
+        total_long_trades = 0
+        
         for deal in self.__deals_history_container__:
             if deal.entry == self.mt5_instance.DEAL_ENTRY_OUT: # a closed position
                 
                 total_trades +=1
+                if deal.type == self.mt5_instance.DEAL_TYPE_BUY:
+                    total_long_trades += 1
+                
+                if deal.type == self.mt5_instance.DEAL_TYPE_SELL:
+                    total_short_trades += 1
                 
                 profit = deal.profit
                     
                 if profit > 0: # A win
+                    
+                    profits.append(profit)
+                    
                     # reset loss streak
                     if cur_loss_count > 0:
                         loss_streaks.append(cur_loss_count)
@@ -2208,6 +2231,9 @@ class Tester:
                         short_trades_won += 1
                         
                 else: # A loss
+                    
+                    losses.append(profit)
+                    
                     # reset win streak
                     if cur_win_count > 0:
                         win_streaks.append(cur_win_count)
@@ -2227,19 +2253,12 @@ class Tester:
                         max_loss_streak_money = cur_loss_money
                         max_loss_streak_count = cur_loss_count
                     
-                    if profit > 0:
-                        profits.append(profit)
-                    else:
-                        losses.append(profit)
         
-        self.tester_stats["Gross Profit"] = sum(profits)
-        self.tester_stats["Gross Loss"] = sum(losses)
+        self.tester_stats["Gross Profit"] = np.sum(profits) if profits else 0
+        self.tester_stats["Gross Loss"] = np.sum(losses) if losses else 0
         self.tester_stats["Net Profit"] = self.tester_stats["Gross Profit"] + self.tester_stats["Gross Loss"]
         
-        self.tester_stats["Profit Factor"] = (
-            self.tester_stats["Gross Profit"] / self.tester_stats["Gross Loss"]
-            if self.tester_stats["Gross Loss"] > 0 else 0.0
-        )
+        self.tester_stats["Profit Factor"] = self.tester_stats["Gross Profit"] / self.tester_stats["Gross Loss"]
         
         self.tester_stats["Expected Payoff"] = (
             self.tester_stats["Net Profit"] / total_trades
@@ -2289,14 +2308,20 @@ class Tester:
         self.tester_stats["Total Trades"] = total_trades
         self.tester_stats["Total Deals"] = len(self.__deals_history_container__)
         
-        self.tester_stats["Profit Trades"] = len(profits)
-        self.tester_stats["Loss Trades"] = len(losses)
+        self.tester_stats["Total Short Trades"] = total_short_trades
+        self.tester_stats["Total Long Trades"] = total_long_trades
         
-        self.tester_stats["Largest Profit Trade"] = max(profits)
-        self.tester_stats["Largest Loss Trade"] = min(losses)
+        self.tester_stats["Short Trades Won"] = short_trades_won
+        self.tester_stats["Long Trades Won"] = long_trades_won
         
-        self.tester_stats["Average Profit Trade"] = np.mean(profits)
-        self.tester_stats["Average Loss Trade"] = np.mean(losses)
+        self.tester_stats["Profit Trades"] = len(profits) if profits else 0
+        self.tester_stats["Loss Trades"] = len(losses) if losses else 0
+        
+        self.tester_stats["Largest Profit Trade"] = np.max(profits) if profits else 0
+        self.tester_stats["Largest Loss Trade"] = np.min(losses) if losses else 0
+        
+        self.tester_stats["Average Profit Trade"] = np.mean(profits) if profits else 0
+        self.tester_stats["Average Loss Trade"] = np.mean(losses) if losses else 0
         
         self.tester_stats["Maximum Consecutive Wins"] = max_profit_streak_count
         self.tester_stats["Maximum Consecutive Losses"] = max_loss_streak_count
@@ -2336,7 +2361,7 @@ class Tester:
         plt.grid(visible=True, which="minor")
         # plt.plot(times, curves["margin"], label="Margin", linewidth=1, alpha=0.6)
 
-        plt.legend()
+        plt.legend(loc="upper right")
         plt.tight_layout()
 
         plt.savefig(output_path, dpi=150, transparent=True)
@@ -2393,7 +2418,7 @@ class Tester:
             return "\n".join(rows)
         # ---------------------- write stats table to a template --------------------
         
-        short_trades_won = self.tester_stats.get('Short Trades Won', 0)
+        short_trades_won = self.tester_stats.get("Short Trades Won", 0)
         long_trades_won = self.tester_stats.get('Long Trades Won', 0)
         
         max_profit_streak_count = self.tester_stats["Maximum Consecutive Wins"]
@@ -2406,7 +2431,7 @@ class Tester:
             <table class="report-table table-sm table-striped">
                 <tbody>
                     <tr>
-                        <th>Bars</th><td class="number">{self.tester_stats.get('Bars', 0)}</td>
+                        <th>Initial Deposit</th><td class="number">{self.tester_config.get('deposit', 0)}</td>
                         <th>Ticks</th><td class="number">{self.tester_stats.get('Ticks', 0)}</td>
                         <th>Symbols</th><td class="number">{self.tester_stats.get('Symbols', 0)}</td>
                     </tr>
@@ -2447,8 +2472,8 @@ class Tester:
                     </tr>
                     <tr>
                         <th>Total Trades</th><td class="number">{self.tester_stats.get('Total Trades', 0)}</td>
-                        <th>Short Trades (won %)</th><td class="number">{short_trades_won} ({100*short_trades_won/self.tester_stats.get('Total Trades',1):.2f}%)</td>
-                        <th>Long Trades (won %)</th><td class="number">{long_trades_won} ({100*long_trades_won/self.tester_stats.get('Total Trades',1):.2f}%)</td>
+                        <th>Short Trades (won %)</th><td class="number">{short_trades_won} ({100*short_trades_won/self.tester_stats.get('Total Short Trades',1):.2f}%)</td>
+                        <th>Long Trades (won %)</th><td class="number">{long_trades_won} ({100*long_trades_won/self.tester_stats.get('Total Long Trades',1):.2f}%)</td>
                     </tr>
                     <tr>
                         <th>Total Deals</th><td class="number">{self.tester_stats.get('Total Deals', 0)}</td>
