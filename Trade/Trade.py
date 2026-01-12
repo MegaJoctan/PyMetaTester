@@ -82,7 +82,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
         
-        self.__GetLogger().info(f"Position Opened successfully!")
+        # self.__GetLogger().info(f"Position Opened successfully!")
             
         return True
     
