@@ -230,6 +230,8 @@ class Tester:
                 "symbol",        # DEAL_SYMBOL
                 "comment",       # DEAL_COMMENT
                 "external_id",   # DEAL_EXTERNAL_ID
+                
+                "balance",       # Account balance
             ]
         )
         self.__deals_history_container__ = []
@@ -1116,6 +1118,9 @@ class Tester:
         rand = secrets.randbits(6)
         return (ts << 6) | rand
 
+    def __generate_order_history_ticket(self) -> int:
+        return len(self.__orders_history_container__)+1
+    
     def __generate_position_ticket(self) -> int:
         ts = int(time.time_ns())
         rand = secrets.randbits(6)
@@ -1127,7 +1132,45 @@ class Tester:
         """
 
         return -0.2
-        
+    
+    def __position_to_order(self, position: namedtuple, ticket=None) -> namedtuple:
+        """
+        Converts an opened position into a FILLED order
+        (MT5 orders history behavior)
+        """
+
+        return self.TradeOrder(
+            ticket=ticket if ticket is not None else position.ticket,
+            time_setup=position.time,
+            time_setup_msc=position.time_msc,
+            time_done=position.time,
+            time_done_msc=position.time_msc,
+            time_expiration=0,
+
+            type=position.type,
+            type_time=self.mt5_instance.ORDER_TIME_GTC,
+            type_filling=self.mt5_instance.ORDER_FILLING_FOK,
+            state=self.mt5_instance.ORDER_STATE_FILLED,
+
+            magic=position.magic,
+            position_id=position.ticket,
+            position_by_id=0,
+            reason=position.reason,
+
+            volume_initial=position.volume,
+            volume_current=position.volume,
+
+            price_open=position.price_open,
+            sl=position.sl,
+            tp=position.tp,
+            price_current=position.price_current,
+            price_stoplimit=0.0,
+
+            symbol=position.symbol,
+            comment=position.comment,
+            external_id=position.external_id,
+        )
+
     def order_send(self, request: dict):
         """
         Sends a request to perform a trading operation from the terminal to the trade server. The function is similar to OrderSend in MQL5.
@@ -1174,9 +1217,9 @@ class Tester:
                 return None 
     
         trade_validators = TradeValidators(symbol_info=symbol_info, 
-                                           ticks_info=ticks_info, 
-                                           logger=self.__GetLogger(), 
-                                           mt5_instance=self.mt5_instance)
+                                        ticks_info=ticks_info, 
+                                        logger=self.__GetLogger(), 
+                                        mt5_instance=self.mt5_instance)
 
         # ------------------ MARKET DEAL (open or close) ------------------
         
@@ -1220,9 +1263,18 @@ class Tester:
                     if not TradeValidators.price_equal(a=price, b=ticks_info.bid, eps=pow(10, -symbol_info.digits)):
                         self.__GetLogger().critical(f"Failed to close ORDER_TYPE_BUY. Price {price} is not equal to bid {ticks_info.bid}")
                         return None
-                        
-                    
-                self.__positions_container__.remove(pos)
+                
+                # update the account balance    
+                
+                self.AccountInfo = self.AccountInfo._replace(
+                    balance=self.AccountInfo.balance + pos.profit
+                )
+                
+                self.__positions_container__.remove(pos) 
+                
+                # self.__orders_history_container__.append(
+                #     self.__position_to_order(position=position) #TODO:
+                # )
                 
                 deal_ticket = self.__generate_deal_ticket()
                 self.__deals_history_container__.append(
@@ -1245,6 +1297,7 @@ class Tester:
                         symbol=symbol,
                         comment=request.get("comment", ""),
                         external_id="",
+                        balance=self.AccountInfo.balance,
                     )
                 )
 
@@ -1274,11 +1327,12 @@ class Tester:
                 return None
             
             
-            if not trade_validators.is_there_enough_money(margin_required=self.order_calc_margin(order_type=order_type, 
-                                                                                                 symbol=symbol,
-                                                                                                 volume=volume,
-                                                                                                 price=price), 
-                                                          free_margin=ac_info.margin_free):
+            if not trade_validators.is_there_enough_money(margin_required=self.order_calc_margin(
+                                                        order_type=order_type, 
+                                                        symbol=symbol,
+                                                        volume=volume,
+                                                        price=price), 
+                                                        free_margin=ac_info.margin_free):
                 return None
             
             position_ticket = self.__generate_position_ticket()
@@ -1309,6 +1363,10 @@ class Tester:
             
             self.__positions_container__.append(position)
 
+            self.__orders_history_container__.append(
+                self.__position_to_order(position=position, ticket=self.__generate_order_history_ticket())
+            )
+            
             self.__deals_history_container__.append(
                 self.TradeDeal(
                     ticket=deal_ticket,
@@ -1329,8 +1387,10 @@ class Tester:
                     symbol=symbol,
                     comment=request.get("comment", ""),
                     external_id="",
+                    balance=self.AccountInfo.balance,
                 )
             )
+            
             
             self.__GetLogger().info(f"Position: {position_ticket} opened!")
                 
@@ -1747,8 +1807,10 @@ class Tester:
         - closes positions when hit
         """
 
-        for pos in list(self.__positions_container__):
-
+        for i in range(len(self.__positions_container__) - 1, -1, -1):
+            
+            pos = self.__positions_container__[i]
+            
             tick = self.tick_cache[pos.symbol]
 
             # --- Determine close price and opposite order type ---
@@ -1764,16 +1826,14 @@ class Tester:
 
             # --- Update floating profit ---
             
-            pos._replace(
-                profit = self.order_calc_profit(
-                order_type=pos.type,
-                symbol=pos.symbol,
-                volume=pos.volume,
-                price_open=pos.price_open,
-                price_close=price
+            profit = self.order_calc_profit(
+                    order_type=pos.type,
+                    symbol=pos.symbol,
+                    volume=pos.volume,
+                    price_open=pos.price_open,
+                    price_close=price
                 )
-            )
-
+            
             # --- Check SL / TP ---
             hit_tp = False
             hit_sl = False
@@ -1789,7 +1849,19 @@ class Tester:
                     price <= pos.sl if pos.type == self.mt5_instance.POSITION_TYPE_BUY
                     else price >= pos.sl
                 )
+                
+            pos = pos._replace(
+                profit=profit,
+                price_current=price,
+                time_update=tick.time,
+                time_update_msc=tick.time_msc
+            )
 
+            # MUST write it back
+            self.__positions_container__[i] = pos
+
+            # self.__GetLogger().debug(pos) #TODO:
+            
             if not (hit_tp or hit_sl):
                 continue
 
@@ -1923,6 +1995,8 @@ class Tester:
         if not self.IS_TESTER:
             return
 
+        self.__TesterInit()
+        
         modelling = self.tester_config["modelling"]
         if modelling == "real_ticks" or modelling == "every_tick":
             
@@ -2000,25 +2074,115 @@ class Tester:
 
                     if not any_bar_processed:
                         break
-                        
-# The ontick function will be called afterwards by the user without them having to worry about updating ticks to the simulator
+        
+        self.__TesterDeinit()
 
-if __name__ == "__main__":
+    def __make_balance_deal(self, time: datetime) -> namedtuple:
+
+        time_sec = int(time.timestamp())
+        time_msc = int(time.timestamp() * 1000)
+
+        return self.TradeDeal(
+            ticket=self.__generate_deal_ticket(),
+            order=0,
+            time=time_sec,
+            time_msc=time_msc,
+            type=self.mt5_instance.DEAL_TYPE_BALANCE,
+            entry=self.mt5_instance.DEAL_ENTRY_IN,
+            magic=0,
+            position_id=0,
+            reason=np.nan,
+            volume=np.nan,
+            price=np.nan,
+            commission=0.0,
+            swap=0.0,
+            profit=0.0,
+            fee=0.0,
+            symbol="",
+            balance=self.AccountInfo.balance,
+            comment="",
+            external_id=""
+        )
+
+    def __TesterInit(self):
+        
+        self.__deals_history_container__.append(
+            self.__make_balance_deal(time=self.tester_config["start_date"])
+        )
+        
+    def __TesterDeinit(self):
+        
+        # self.__deals_history_container__.append(
+        #     self.__make_balance_deal(time=self.tester_config["end_date"])
+        # )
+        
+        # generate a report at the end
+        self.__GenerateTesterReport(output_file=f"Reports/{self.tester_config['bot_name']}-report.html")
     
-    mt5.initialize()
+    def __GenerateTesterReport(self, output_file="Tester report.html"):
+        
+        def render_order_rows(orders):
+            rows = []
+
+            for o in orders:
+                rows.append(f"""
+                <tr>
+                    <td>{datetime.fromtimestamp(o.time_setup)}</td>
+                    <td>{o.ticket}</td>
+                    <td>{o.symbol}</td>
+                    <td>{utils.ORDER_TYPE_MAP.get(o.type, o.type)}</td>
+                    <td class="text-end">{o.volume_initial:.2f} / {o.volume_current:.2f}</td>
+                    <td class="text-end">{o.price_open:.5f}</td>
+                    <td class="text-end">{"" if o.sl == 0 else f"{o.sl:.5f}"}</td>
+                    <td class="text-end">{"" if o.tp == 0 else f"{o.tp:.5f}"}</td>
+                    <td>{datetime.fromtimestamp(o.time_done) if o.time_done else ""}</td>
+                    <td>{utils.ORDER_STATE_MAP.get(o.state, o.state)}</td>
+                    <td>{o.comment}</td>
+                </tr>
+                """)
+
+            return "\n".join(rows)
+
+        def render_deal_rows(deals):
+            rows = []
+
+            for d in deals:
+
+                rows.append(f"""
+                <tr>
+                    <td>{datetime.fromtimestamp(d.time)}</td>
+                    <td>{d.ticket}</td>
+                    <td>{d.symbol}</td>
+                    <td>{utils.DEAL_TYPE_MAP[d.type]}</td>
+                    <td>{utils.DEAL_ENTRY_MAP[d.entry]}</td>
+                    <td class="text-end">{d.volume:.2f}</td>
+                    <td class="text-end">{d.price:.5f}</td>
+                    <td class="text-end">{d.commission:.2f}</td>
+                    <td class="text-end">{d.swap:.2f}</td>
+                    <td class="text-end">{d.profit:.2f}</td>
+                    <td>{d.comment}</td>
+                    <td>{round(d.balance, 2)}</td>
+                </tr>
+                """)
+
+            return "\n".join(rows)
+
+
+        with open("Reports/template.html", "r", encoding="utf-8") as f:
+            template = f.read()
+
+        order_rows_html = render_order_rows(self.__orders_history_container__)
+        deal_rows_html = render_deal_rows(self.__deals_history_container__)
+
+        html = (
+            template
+            .replace("{{ORDER_ROWS}}", order_rows_html)
+            .replace("{{DEAL_ROWS}}", deal_rows_html)
+        )
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(html)
+
+        print(f"Deals report saved to: {output_file}")
+        
     
-    try:
-        with open(os.path.join('configs/tester.json'), 'r', encoding='utf-8') as file: # reading a JSON file
-            # Deserialize the file data into a Python object
-            data = json.load(file)
-    except Exception as e:
-        raise RuntimeError(e)
-
-    sim = Tester(tester_config=data["tester"], mt5_instance=mt5)
-
-    def ontick_function():
-        pass
-        # print("some trading actions")
-        # exit()
-
-    sim.OnTick(ontick_function)
