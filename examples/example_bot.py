@@ -1,6 +1,6 @@
 import MetaTrader5 as mt5
-from strategytester.tester import StrategyTester
-from strategytester.trade_classes.Trade import CTrade
+from strategytester5.tester import StrategyTester
+from strategytester5.trade_classes.Trade import CTrade
 import json
 import os
 import sys
