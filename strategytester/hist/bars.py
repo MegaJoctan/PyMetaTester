@@ -1,9 +1,8 @@
 import MetaTrader5 as mt5
 from datetime import datetime, timezone, timedelta
 import os
-import utils
-import config
 import polars as pl
+from strategytester import *
 
 def bars_to_polars(bars):
     
@@ -23,26 +22,27 @@ def fetch_historical_bars(symbol: str,
                         timeframe: int,
                         start_datetime: datetime,
                         end_datetime: datetime) -> pl.DataFrame:
-
-    if not utils.ensure_symbol(symbol=symbol):
-        
-        if config.tester_logger is None:
-            print(f"Symbol {symbol} not available")
-        else:
-            config.tester_logger.warning(f"Symbol {symbol} not available")
-        return pl.DataFrame()
-
-    start_datetime = utils.ensure_utc(start_datetime)
-    end_datetime   = utils.ensure_utc(end_datetime)
+    """
+        if not ensure_symbol(symbol=symbol):
+            
+            if LOGGER is None:
+                print(f"Symbol {symbol} not available")
+            else:
+                LOGGER.warning(f"Symbol {symbol} not available")
+            return pl.DataFrame()
+    """
+    
+    start_datetime = ensure_utc(start_datetime)
+    end_datetime   = ensure_utc(end_datetime)
 
     current = start_datetime.replace(day=1, hour=0, minute=0, second=0)
 
     dfs: list[pl.DataFrame] = []
 
-    tf_name = utils.TIMEFRAMES_REV[timeframe]
+    tf_name = TIMEFRAMES_MAP_REVERSE[timeframe]
 
     while True:
-        month_start, month_end = utils.month_bounds(current)
+        month_start, month_end = month_bounds(current)
 
         if (
             month_start.year == end_datetime.year and
@@ -53,10 +53,10 @@ def fetch_historical_bars(symbol: str,
         if month_start > end_datetime:
             break
 
-        if config.tester_logger is None:
+        if LOGGER is None:
             print(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         else:
-            config.tester_logger.info(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+            LOGGER.info(f"Processing bars for {symbol} ({tf_name}): {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         
 
         rates = mt5.copy_rates_range(
@@ -68,10 +68,10 @@ def fetch_historical_bars(symbol: str,
 
         if rates is None:
             
-            if config.tester_logger is None:
+            if LOGGER is None:
                 print(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
             else:
-                config.tester_logger.warning(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
+                LOGGER.warning(f"No bars for {symbol} {tf_name} {month_start:%Y-%m}")
                 
             current = (month_start + timedelta(days=32)).replace(day=1)
             continue
@@ -90,12 +90,12 @@ def fetch_historical_bars(symbol: str,
         ])
 
         df.write_parquet(
-            os.path.join(config.BARS_HISTORY_DIR, symbol, tf_name),
+            os.path.join("Bars", symbol, tf_name),
             partition_by=["year", "month"],
             mkdir=True
         )
         
-        # if config.is_debug: 
+        # if is_debug: 
         #     print(df.head(-10))
             
         dfs.append(df)
@@ -125,9 +125,9 @@ if __name__ == "__main__":
     # read polaris dataframe and print the head for both symbols
 
     symbol = "GBPUSD"
-    timeframe = utils.TIMEFRAMES_REV[mt5.TIMEFRAME_M5]
+    timeframe = TIMEFRAMES_REV[mt5.TIMEFRAME_M5]
     
-    path = os.path.join(config.BARS_HISTORY_DIR, symbol, timeframe)
+    path = os.path.join(BARS_HISTORY_DIR, symbol, timeframe)
     
     lf = pl.scan_parquet(path)
 

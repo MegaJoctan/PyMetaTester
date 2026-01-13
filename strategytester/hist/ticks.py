@@ -1,9 +1,8 @@
 import MetaTrader5 as mt5
 from datetime import datetime, timezone, timedelta
 import os
-import config
-import utils
 import polars as pl
+from strategytester import *
 
 def ticks_to_polars(ticks):
     return pl.DataFrame({
@@ -20,23 +19,24 @@ def ticks_to_polars(ticks):
 def fetch_historical_ticks(start_datetime: datetime, 
                         end_datetime: datetime,
                         symbol: str) -> pl.DataFrame:
-
-    if not utils.ensure_symbol(symbol=symbol):
-        if config.tester_logger is None:
+    """
+    if not ensure_symbol(symbol=symbol):
+        if LOGGER is None:
             print(f"Symbol {symbol} not available")
         else:
-            config.tester_logger.warning(f"Symbol {symbol} not available")
+            LOGGER.warning(f"Symbol {symbol} not available")
         return pl.DataFrame()
+    """
 
-    start_datetime = utils.ensure_utc(start_datetime)
-    end_datetime   = utils.ensure_utc(end_datetime)
+    start_datetime = ensure_utc(start_datetime)
+    end_datetime   = ensure_utc(end_datetime)
 
     current = start_datetime.replace(day=1, hour=0, minute=0, second=0)
 
     dfs: list[pl.DataFrame] = []
 
     while True:
-        month_start, month_end = utils.month_bounds(current)
+        month_start, month_end = month_bounds(current)
 
         if (
             month_start.year == end_datetime.year and
@@ -47,10 +47,10 @@ def fetch_historical_ticks(start_datetime: datetime,
         if month_start > end_datetime:
             break
         
-        if config.tester_logger is None:
+        if LOGGER is None:
             print(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
         else:
-            config.tester_logger.info(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
+            LOGGER.info(f"Processing ticks for {symbol}: {month_start:%Y-%m-%d} -> {month_end:%Y-%m-%d}")
 
         ticks = mt5.copy_ticks_range(
             symbol,
@@ -61,10 +61,10 @@ def fetch_historical_ticks(start_datetime: datetime,
 
         if ticks is None or len(ticks) == 0:
             
-            if config.tester_logger is None:
+            if LOGGER is None:
                 print(f"No ticks for {symbol} {month_start:%Y-%m}")
             else:
-                config.tester_logger.warning(f"No ticks for {symbol} {month_start:%Y-%m}")
+                LOGGER.warning(f"No ticks for {symbol} {month_start:%Y-%m}")
                 
             current = (month_start + timedelta(days=32)).replace(day=1)
             continue
@@ -84,7 +84,7 @@ def fetch_historical_ticks(start_datetime: datetime,
 
         # Save monthly partitions
         df.write_parquet(
-            os.path.join(config.TICKS_HISTORY_DIR, symbol),
+            os.path.join("Ticks", symbol),
             partition_by=["year", "month"],
             mkdir=True
         )

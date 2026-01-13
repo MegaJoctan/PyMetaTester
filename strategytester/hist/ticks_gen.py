@@ -1,10 +1,7 @@
 import numpy as np
-import datetime
 import polars as pl
 import os
-import config
-import utils
-
+from strategytester import *
 class TicksGen:
     def __init__(self):
         pass
@@ -42,7 +39,7 @@ class TicksGen:
         if tick_count == 1:
             price = bar["close"]
             return [
-                utils.make_tick(
+                make_tick(
                     bar["time"],
                     price,
                     price + spread * symbol_point,
@@ -53,8 +50,8 @@ class TicksGen:
         # ----- 2 ticks ----
         if tick_count == 2:
             return [
-                utils.make_tick(bar["time"], bar["open"], bar["open"] + spread * symbol_point, time_msc=base_msc),
-                utils.make_tick(bar["time"], bar["close"], bar["close"] + spread * symbol_point, time_msc=base_msc + step),
+                make_tick(bar["time"], bar["open"], bar["open"] + spread * symbol_point, time_msc=base_msc),
+                make_tick(bar["time"], bar["close"], bar["close"] + spread * symbol_point, time_msc=base_msc + step),
             ]
 
         # ---- Support points ----
@@ -72,7 +69,7 @@ class TicksGen:
             prices = TicksGen.interpolate_prices(start, end, steps)
             for price in prices:
                 ticks.append(
-                    utils.make_tick(
+                    make_tick(
                         time=bar["time"],
                         bid=float(price),
                         ask=float(price + spread * symbol_point),
@@ -105,10 +102,10 @@ class TicksGen:
 
         for (year, month), bars_chunk in bars.group_by(["year", "month"], maintain_order=True):
 
-            if config.tester_logger is None:
+            if LOGGER is None:
                 print(f"Generating ticks for {symbol}: {year}-{month:02d}")
             else:
-                config.tester_logger.info(f"Generating ticks for {symbol}: {year}-{month:02d}")
+                LOGGER.info(f"Generating ticks for {symbol}: {year}-{month:02d}")
 
             tick_rows = []
 
