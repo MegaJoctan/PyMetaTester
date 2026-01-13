@@ -1,9 +1,8 @@
 import MetaTrader5 as mt5
-from tester import Tester
-from Trade.Trade import CTrade
+from strategytester.tester import StrategyTester
+from strategytester.trade_classes.Trade import CTrade
 import json
 import os
-import config
 
 if not mt5.initialize(): # Initialize MetaTrader5 instance
     print(f"Failed to Initialize MetaTrader5. Error = {mt5.last_error()}")
@@ -11,13 +10,13 @@ if not mt5.initialize(): # Initialize MetaTrader5 instance
     quit()
     
 try:
-    with open(os.path.join(config.CONFIGS_DIR,'tester.json'), 'r', encoding='utf-8') as file: # reading a JSON file
+    with open('tester.json', 'r', encoding='utf-8') as file: # reading a JSON file
         # Deserialize the file data into a Python object
         tester_configs = json.load(file)
 except Exception as e:
     raise RuntimeError(e)
 
-tester = Tester(tester_config=tester_configs["tester"], mt5_instance=mt5) # very important
+tester = StrategyTester(tester_config=tester_configs["tester"], mt5_instance=mt5) # very important
 
 # ---------------------- inputs ----------------------------
 
