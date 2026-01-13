@@ -12,13 +12,14 @@ import fnmatch
 from typing import Optional, Tuple
 from collections import namedtuple
 import polars as pl
-import utils
 from validators._trade import TradeValidators
 from validators._tester_configs import TesterConfigValidators
+from . _template import html_report_template
 import sys
-from hist import ticks
-from hist import bars
+
+from hist import ticks, bars
 from hist.ticks_gen import TicksGen
+
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -104,7 +105,7 @@ class StrategyTester:
             elif modelling == "new_bar":
                 
                 bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
-                                                        timeframe=utils.TIMEFRAMES[self.tester_config["timeframe"]],
+                                                        timeframe=TIMEFRAMES_MAP[self.tester_config["timeframe"]],
                                                         start_datetime=start_dt,
                                                         end_datetime=end_dt)
                 
@@ -120,7 +121,7 @@ class StrategyTester:
             elif modelling == "1-minute-ohlc":
                 
                 bars_obtained = bars.fetch_historical_bars(symbol=symbol, 
-                                                        timeframe=utils.TIMEFRAMES["M1"],
+                                                        timeframe=TIMEFRAMES_MAP["M1"],
                                                         start_datetime=start_dt,
                                                         end_datetime=end_dt)
                 
@@ -136,7 +137,7 @@ class StrategyTester:
             elif modelling == "every_tick":
                 
                 bars_df = bars.fetch_historical_bars(symbol=symbol, 
-                                                    timeframe=utils.TIMEFRAMES["M1"], 
+                                                    timeframe=TIMEFRAMES_MAP["M1"], 
                                                     start_datetime=start_dt, end_datetime=end_dt)
                 
                 dir = os.path.join(self.history_dir, "Ticks", "Simulated", symbol)
@@ -337,10 +338,10 @@ class StrategyTester:
             self.logger.critical("Failed to update ticks, Invalid type received. It can either be a Tick, dict, or tuple datatypes")
             
         if isinstance(tick, dict):
-            tick = utils.make_tick_from_dict(tick)
+            tick = make_tick_from_dict(tick)
         
         if isinstance(tick, tuple):
-            tick = utils.make_tick_from_tuple(tick)
+            tick = make_tick_from_tuple(tick)
         
         self.tick_cache[symbol] = tick
     
@@ -374,7 +375,7 @@ class StrategyTester:
             Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Return None in case of an error. The info on the error can be obtained using last_error().
         """
         
-        date_from = utils.ensure_utc(date_from)
+        date_from = ensure_utc(date_from)
         
         if self.IS_TESTER:    
             
@@ -448,7 +449,7 @@ class StrategyTester:
         if self.IS_TESTER:    
             rates = self.copy_rates_from(symbol=symbol, 
                                         timeframe=timeframe,
-                                        date_from=now+timedelta(seconds=utils.PeriodSeconds(timeframe)*start_pos),
+                                        date_from=now+timedelta(seconds=PeriodSeconds(timeframe)*start_pos),
                                         count=count)
         
         else:
@@ -475,8 +476,8 @@ class StrategyTester:
                 Returns bars as the numpy array with the named time, open, high, low, close, tick_volume, spread and real_volume columns. Returns None in case of an error. The info on the error can be obtained using MetaTrader5.last_error().
         """
         
-        date_from = utils.ensure_utc(date_from)
-        date_to = utils.ensure_utc(date_to)
+        date_from = ensure_utc(date_from)
+        date_to = ensure_utc(date_to)
         
         if self.IS_TESTER:    
             
@@ -559,7 +560,7 @@ class StrategyTester:
             Returns ticks as the numpy array with the named time, bid, ask, last and flags columns. The 'flags' value can be a combination of flags from the TICK_FLAG enumeration. Return None in case of an error. The info on the error can be obtained using last_error().
         """
         
-        date_from = utils.ensure_utc(date_from)
+        date_from = ensure_utc(date_from)
         flag_mask = self.__tick_flag_mask(flags)
 
         if self.IS_TESTER:    
@@ -625,8 +626,8 @@ class StrategyTester:
             Returns ticks as the numpy array with the named time, bid, ask, last and flags columns. The 'flags' value can be a combination of flags from the TICK_FLAG enumeration. Return None in case of an error. The info on the error can be obtained using last_error().
         """
         
-        date_from = utils.ensure_utc(date_from)
-        date_to = utils.ensure_utc(date_to)
+        date_from = ensure_utc(date_from)
+        date_to = ensure_utc(date_to)
         
         flag_mask = self.__tick_flag_mask(flags)
 
@@ -828,8 +829,8 @@ class StrategyTester:
             self.logger.error("date_from and date_to must be specified")
             return None
             
-        date_from = utils.ensure_utc(date_from)
-        date_to = utils.ensure_utc(date_to)
+        date_from = ensure_utc(date_from)
+        date_to = ensure_utc(date_to)
         
         if self.IS_TESTER:
         
@@ -875,8 +876,8 @@ class StrategyTester:
                 self.logger.error("date_from and date_to must be specified")
                 return None
 
-            date_from_ts = int(utils.ensure_utc(date_from).timestamp())
-            date_to_ts   = int(utils.ensure_utc(date_to).timestamp())
+            date_from_ts = int(ensure_utc(date_from).timestamp())
+            date_to_ts   = int(ensure_utc(date_to).timestamp())
 
             filtered = (
                 o for o in orders
@@ -903,8 +904,8 @@ class StrategyTester:
             if date_from is None or date_to is None:
                 raise ValueError("date_from and date_to are required")
 
-            date_from = utils.ensure_utc(date_from)
-            date_to   = utils.ensure_utc(date_to)
+            date_from = ensure_utc(date_from)
+            date_to   = ensure_utc(date_to)
 
             if group is not None:
                 return self.mt5_instance.history_orders_get(
@@ -934,8 +935,8 @@ class StrategyTester:
             self.logger.error("date_from and date_to must be specified")
             return -1
 
-        date_from = utils.ensure_utc(date_from)
-        date_to   = utils.ensure_utc(date_to)
+        date_from = ensure_utc(date_from)
+        date_to   = ensure_utc(date_to)
 
         if self.IS_TESTER:
 
@@ -999,8 +1000,8 @@ class StrategyTester:
                 self.logger.error("date_from and date_to must be specified")
                 return None
 
-            date_from_ts = int(utils.ensure_utc(date_from).timestamp())
-            date_to_ts   = int(utils.ensure_utc(date_to).timestamp())
+            date_from_ts = int(ensure_utc(date_from).timestamp())
+            date_to_ts   = int(ensure_utc(date_to).timestamp())
 
             filtered = (
                 d for d in deals
@@ -1027,8 +1028,8 @@ class StrategyTester:
             if date_from is None or date_to is None:
                 raise ValueError("date_from and date_to are required")
 
-            date_from = utils.ensure_utc(date_from)
-            date_to   = utils.ensure_utc(date_to)
+            date_from = ensure_utc(date_from)
+            date_to   = ensure_utc(date_to)
 
             if group is not None:
                 return self.mt5_instance.history_deals_get(
@@ -1955,7 +1956,7 @@ class StrategyTester:
 
                         current_tick = ticks_info["ticks"].row(counter)
                         
-                        current_tick = utils.make_tick_from_tuple(current_tick)
+                        current_tick = make_tick_from_tuple(current_tick)
                         self.TickUpdate(symbol=symbol, tick=current_tick)
                         
                         self.__curves_update(current_tick.time)
@@ -2411,14 +2412,13 @@ class StrategyTester:
                 
         curve_img = self._plot_tester_curves(output_path=os.path.join(path, f"{self.tester_config['bot_name'].replace(' ', '_')}_curve.png"))
         curve_img = curve_img.replace(self.reports_dir+'\\', "")
-        
-        with open(os.path.join(self.reports_dir, "template.html"), "r", encoding="utf-8") as f:
-            template = f.read()
 
         # ------------------ render orders and deals ------------------------------
         
         order_rows_html = render_order_rows(self.__orders_history_container__)
         deal_rows_html = render_deal_rows(self.__deals_history_container__)
+        
+        template = html_report_template()
         
         # we populate table's body
         

@@ -1,3 +1,5 @@
+def html_report_template() -> str:
+    return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -245,3 +247,5 @@
 
 </body>
 </html>
+
+"""
