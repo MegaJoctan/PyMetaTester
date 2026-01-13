@@ -90,7 +90,7 @@ def fetch_historical_bars(symbol: str,
         ])
 
         df.write_parquet(
-            os.path.join("Bars", symbol, tf_name),
+            os.path.join("History","Bars", symbol, tf_name),
             partition_by=["year", "month"],
             mkdir=True
         )
