@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "strategytester"
+name = "strategytester5"
 version = "1.0.0"
 description = "A Python-based MetaTrader strategy tester for the MetaTrader5 module"
 readme = "README.md"
@@ -53,5 +53,5 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MegaJoctan/StrategyTester"
-Repository = "https://github.com/MegaJoctan/StrategyTester"
+Homepage = "https://github.com/MegaJoctan/StrategyTester5"
+Repository = "https://github.com/MegaJoctan/StrategyTester5"
