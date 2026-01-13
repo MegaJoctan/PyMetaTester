@@ -14,7 +14,7 @@ pip install -r requirements.txt
 
 ### Running your First Robot in The Strategy Tester
 
-### Step 1: Initialize the desired MetaTrader 5 terminal right after importing its module, alongside other useful Python modules for this project.
+**Step 1: Initialize the desired MetaTrader 5 terminal right after importing its module, alongside other useful Python modules for this project.**
 
 ```python
 import MetaTrader5 as mt5
@@ -30,7 +30,7 @@ if not mt5.initialize(): # Initialize MetaTrader5 instance
     quit()
 ```
 
-### Step 2: Load configurations from a JSON file. *In this case configs/tester.json file*.
+**Step 2: Load configurations from a JSON file. *In this case configs/tester.json file*.**
 
 ```python
 try:
@@ -41,18 +41,19 @@ except Exception as e:
     raise RuntimeError(e)
 ```
 
-### Step 3: Initialize the Tester class, giving it configurations and an initialized MetaTrader 5 instance.
+**Step 3: Initialize the Tester class, giving it configurations and an initialized MetaTrader 5 instance.**
 
 ```python
 tester = Tester(tester_config=tester_configs["tester"], mt5_instance=mt5) # very important
 ```
 
-### Optionally, instantiate the CTrade class to make life much easier.
+**Optionally, instantiate the CTrade class to make life much easier.**
+
 ```python
 m_trade = CTrade(simulator=tester, magic_number=magic_number, filling_type_symbol=symbol, deviation_points=slippage)
 ```
 
-### Step 4: Write some trading strategy 
+**Step 4: Write some trading strategy**
 
 ```python
 # ---------------------- inputs ----------------------------
@@ -92,7 +93,7 @@ def on_tick():
         m_trade.sell(volume=0.1, symbol=symbol, price=bid, sl=bid+sl*pts, tp=bid-tp*pts, comment="Tester sell") # we open a sell position
 ```
 
-### Step 5: Call the main trading function into action on every tick, similarly to the [OnTick function in MQL5](https://www.mql5.com/en/docs/event_handlers/ontick)
+**Step 5: Call the main trading function into action on every tick, similarly to the [OnTick function in MQL5](https://www.mql5.com/en/docs/event_handlers/ontick)**
 
 ```python
 tester.OnTick(ontick_func=on_tick) # very important!
@@ -101,7 +102,7 @@ tester.OnTick(ontick_func=on_tick) # very important!
 https://github.com/user-attachments/assets/09ed6921-8f00-4b49-8bcf-c6ac6ae9cdb3
 
 
-## More information about the project
+**More information about the project**
 
 - [https://www.mql5.com/en/articles/18971](https://www.mql5.com/en/articles/18971)
 - [https://www.mql5.com/en/articles/20455](https://www.mql5.com/en/articles/20455)
