@@ -2,8 +2,7 @@ from collections import namedtuple
 import MetaTrader5 as mt5
 from typing import Dict
 from datetime import datetime
-import utils
-import config
+from strategytester import *
 
 class TradeValidators:
     def __init__(self, 
@@ -16,34 +15,6 @@ class TradeValidators:
         self.ticks_info = ticks_info
         self.logger = logger
         self.mt5_instance = mt5_instance
-        
-        self.BUY_ACTIONS = {
-            # self.mt5_instance.POSITION_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_BUY,
-            self.mt5_instance.ORDER_TYPE_BUY_LIMIT,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP,
-            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT,
-        }
-
-        self.SELL_ACTIONS = {
-            # self.mt5_instance.POSITION_TYPE_SELL,
-            self.mt5_instance.ORDER_TYPE_SELL,
-            self.mt5_instance.ORDER_TYPE_SELL_LIMIT,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP,
-            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT,
-        }
-        
-        self.ORDER_TYPES_MAP = {
-            self.mt5_instance.ORDER_TYPE_BUY: "Market Buy order",
-            self.mt5_instance.ORDER_TYPE_SELL : "Market Sell order",
-            self.mt5_instance.ORDER_TYPE_BUY_LIMIT : "Buy Limit pending order",
-            self.mt5_instance.ORDER_TYPE_SELL_LIMIT : "Sell Limit pending order",
-            self.mt5_instance.ORDER_TYPE_BUY_STOP : "Buy Stop pending order",
-            self.mt5_instance.ORDER_TYPE_SELL_STOP : "Sell Stop pending order",
-            self.mt5_instance.ORDER_TYPE_BUY_STOP_LIMIT: "Buy Stop Limit pending order",
-            self.mt5_instance.ORDER_TYPE_SELL_STOP_LIMIT: "Sell Stop Limit pending order",
-            self.mt5_instance.ORDER_TYPE_CLOSE_BY: "Order to close a position by an opposite one"
-        }
         
     def is_valid_lotsize(self, lotsize: float) -> bool:
         
@@ -210,13 +181,13 @@ class TradeValidators:
             return False
             
         if sl > 0:
-            if order_type in self.BUY_ACTIONS: # buy action
+            if order_type in BUY_ACTIONS: # buy action
                 
                 if sl >= entry:
                     self.logger.info(f"Trade validation failed: Buy-based order's stop loss ({sl}) must be below order opening price ({entry})")
                     return False
                 
-            elif order_type in self.SELL_ACTIONS: # sell action
+            elif order_type in SELL_ACTIONS: # sell action
                 
                 if sl <= entry:
                     self.logger.info(f"Trade validation failed: Sell-based order's stop loss ({sl}) must be above order opening price ({entry})")
@@ -234,13 +205,13 @@ class TradeValidators:
             return False
         
         if tp > 0:
-            if order_type in self.BUY_ACTIONS: # buy position
+            if order_type in BUY_ACTIONS: # buy position
                 if tp <= entry:
-                    self.logger.info(f"Trade validation failed: {self.ORDER_TYPES_MAP[order_type]} take profit ({tp}) must be above order opening price ({entry})")
+                    self.logger.info(f"Trade validation failed: {ORDER_TYPE_MAP[order_type]} take profit ({tp}) must be above order opening price ({entry})")
                     return False
-            elif order_type in self.SELL_ACTIONS: # sell position
+            elif order_type in SELL_ACTIONS: # sell position
                 if tp >= entry:
-                    self.logger.info(f"Trade validation failed: {self.ORDER_TYPES_MAP[order_type]} take profit ({tp}) must be below order opening price ({entry})")
+                    self.logger.info(f"Trade validation failed: {ORDER_TYPE_MAP[order_type]} take profit ({tp}) must be below order opening price ({entry})")
                     return False
             else:
                 self.logger.error("Unknown MetaTrader 5 order type")
@@ -285,98 +256,3 @@ class TradeValidators:
             return False
 
         return True
-    
-class TesterConfigValidators:
-    """
-    Responsible for validating and normalizing strategy tester configurations.
-    """
-
-    def __init__(self):
-        pass
-    
-    @staticmethod
-    def _validate_keys(raw_config: Dict) -> None:
-        
-        required_keys = config.REQUIRED_TESTER_CONFIG_KEYS
-        provided_keys = set(raw_config.keys())
-
-        missing = required_keys - provided_keys
-        if missing:
-            raise RuntimeError(f"Missing tester config keys: {missing}")
-
-        extra = provided_keys - required_keys
-        if extra:
-            raise RuntimeError(f"Unknown tester config keys: {extra}")
-        
-    @staticmethod
-    def _parse_leverage(leverage: str) -> int:
-        """
-        Converts '1:100' -> 100
-        """
-        try:
-            left, right = leverage.split(":")
-            if left != "1":
-                raise ValueError
-            value = int(right)
-            if value <= 0:
-                raise ValueError
-            return value
-        except Exception:
-            raise RuntimeError(f"Invalid leverage format: {leverage}")
-
-    @staticmethod
-    def parse_tester_configs(raw_config: Dict) -> Dict:
-        TesterConfigValidators._validate_keys(raw_config)
-
-        cfg: Dict = {}
-
-        # --- BOT NAME ---
-        cfg["bot_name"] = str(raw_config["bot_name"])
-
-        # --- SYMBOLS ---
-        symbols = raw_config["symbols"]
-        if not isinstance(symbols, list) or not symbols:
-            raise RuntimeError("symbols must be a non-empty list")
-        cfg["symbols"] = symbols
-
-        # --- TIMEFRAME ---
-        timeframe = raw_config["timeframe"].upper()
-        if timeframe not in utils.TIMEFRAMES:
-            raise RuntimeError(f"Invalid timeframe: {timeframe}")
-        cfg["timeframe"] = timeframe
-
-        # --- MODELLING ---
-        modelling = raw_config["modelling"].lower()
-        
-        if modelling not in config.SUPPORTED_TESTER_MODELLING:
-            raise RuntimeError(f"Invalid modelling mode: {modelling}, supported modellings include: {config.SUPPORTED_TESTER_MODELLING}")
-        
-        cfg["modelling"] = modelling
-
-        # --- DATE PARSING ---
-        try:
-            start_date = datetime.strptime(
-                raw_config["start_date"], "%d.%m.%Y %H:%M"
-            )
-            end_date = datetime.strptime(
-                raw_config["end_date"], "%d.%m.%Y %H:%M"
-            )
-        except ValueError:
-            raise RuntimeError("Date format must be: DD.MM.YYYY HH:MM")
-
-        if start_date >= end_date:
-            raise RuntimeError("start_date must be earlier than end_date")
-
-        cfg["start_date"] = start_date
-        cfg["end_date"] = end_date
-
-        # --- DEPOSIT ---
-        deposit = float(raw_config["deposit"])
-        if deposit <= 0:
-            raise RuntimeError("deposit must be > 0")
-        cfg["deposit"] = deposit
-
-        # --- LEVERAGE ---
-        cfg["leverage"] = TesterConfigValidators._parse_leverage(raw_config["leverage"])
-
-        return cfg
