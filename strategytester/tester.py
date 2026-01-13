@@ -2,7 +2,7 @@ from strategytester import *
 # from strategytester import Tick, TradeOrder, TradePosition, TradeDeal, AccountInfo
 
 import MetaTrader5 as mt5
-import error_description
+from . import error_description
 from datetime import datetime, timedelta, timezone
 import secrets
 import time
@@ -12,13 +12,13 @@ import fnmatch
 from typing import Optional, Tuple
 from collections import namedtuple
 import polars as pl
-from validators._trade import TradeValidators
-from validators._tester_configs import TesterConfigValidators
-from . _template import html_report_template
+from strategytester.validators._trade import TradeValidators
+from strategytester.validators._tester_configs import TesterConfigValidators
+from strategytester._template import html_report_template
 import sys
 
-from hist import ticks, bars
-from hist.ticks_gen import TicksGen
+from strategytester.hist import ticks, bars
+from strategytester.hist.ticks_gen import TicksGen
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -55,18 +55,24 @@ class StrategyTester:
         
         self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
         
-        if not self.IS_TESTER:
-            self.logger.debug("MT5 mode")
             
         # -------------------- initialize the Loggers ----------------------------
         
         self.mt5_instance = mt5_instance
         self.simulator_name = self.tester_config["bot_name"]
         
+        
+        os.makedirs(logs_dir, exist_ok=True)
         self.logger = get_logger(self.simulator_name+ ".tester" if self.IS_TESTER else ".mt5", 
                                         logfile=os.path.join(logs_dir, f"{LOG_DATE}.log"),
                                         level=logging_level)
         
+        global LOGGER
+        LOGGER = self.logger
+        
+        if not self.IS_TESTER:
+            self.logger.debug("MT5 mode")
+            
         # -------------- Check if we are not on the tester mode ------------------
         
         self.IS_TESTER = not any(arg.startswith("--mt5") for arg in sys.argv) # are we on the strategy tester mode or live trading
