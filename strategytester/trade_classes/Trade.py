@@ -1,6 +1,6 @@
 import MetaTrader5 as mt5
 from datetime import datetime, timezone
-import config
+from strategytester import *
 
 class CTrade:
     
@@ -30,13 +30,6 @@ class CTrade:
         }
         
         return filling_map.get(symbol_info.filling_mode, f"Unknown Filling type")
-    
-    
-    def __GetLogger(self):
-        if self.simulator.IS_TESTER:
-            return config.tester_logger
-        
-        return config.simulator_logger
     
     def position_open(self, symbol: str, volume: float, order_type: int, price: float, sl: float=0.0, tp: float=0.0, comment: str="") -> bool:
         
@@ -82,7 +75,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
         
-        # self.__GetLogger().info(f"Position Opened successfully!")
+        # LOGGER.info(f"Position Opened successfully!")
             
         return True
     
@@ -145,7 +138,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
         
-        self.__GetLogger().info(f"Order opened successfully!")
+        LOGGER.info(f"Order opened successfully!")
         return True
     
     
@@ -394,7 +387,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
 
-        self.__GetLogger().info(f"Position {ticket} closed successfully!")
+        LOGGER.info(f"Position {ticket} closed successfully!")
         return True
     
     def order_delete(self, ticket: int) -> bool:
@@ -414,7 +407,7 @@ class CTrade:
     
         order = self.simulator.orders_get(ticket=ticket)[0]
         if order is None:
-            self.__GetLogger().info(f"Order {order} not found!")
+            LOGGER.info(f"Order {order} not found!")
         
         request = {
             "action": self.mt5_instance.TRADE_ACTION_REMOVE,
@@ -428,7 +421,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
 
-        self.__GetLogger().info(f"Order {ticket} deleted successfully!")
+        LOGGER.info(f"Order {ticket} deleted successfully!")
         return True
             
 
@@ -471,7 +464,7 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
         
-        self.__GetLogger().info(f"Position {ticket} modified successfully!")
+        LOGGER.info(f"Position {ticket} modified successfully!")
         return True
     
     def order_modify(self, ticket: int, price: float, sl: float, tp: float, type_time: int = mt5.ORDER_TIME_GTC, expiration: datetime = None, stoplimit: float = 0.0) -> bool:
@@ -533,5 +526,5 @@ class CTrade:
         if self.simulator.order_send(request) is None:
             return False
 
-        self.__GetLogger().info(f"Order {ticket} modified successfully!")
+        LOGGER.info(f"Order {ticket} modified successfully!")
         return True
