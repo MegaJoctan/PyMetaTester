@@ -19,7 +19,8 @@ dependencies = [
   "numpy",
   "polars",
   "matplotlib",
-  "seaborn"
+  "seaborn",
+  "tqdm"
 ]
 
 keywords = [
