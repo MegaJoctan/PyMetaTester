@@ -5,6 +5,7 @@ from collections import namedtuple
 import logging
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
+from calendar import monthrange
 import MetaTrader5
 
 IS_DEBUG = True
@@ -76,6 +77,17 @@ def ensure_utc(dt: datetime) -> datetime:
     # Aware → convert to UTC if needed
     return dt.astimezone(timezone.utc)
 
+def month_bounds(dt: datetime):
+    
+    """Return (month_start, month_end) in UTC."""
+    
+    year, month = dt.year, dt.month
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+
+    last_day = monthrange(year, month)[1]
+    end = datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
+
+    return start, end
 def make_tick(
     time: datetime,
     bid: float,
@@ -445,6 +457,8 @@ def get_logger(task_name: str, logfile: str, level=logging.INFO):
 
     logger.propagate = False
     return logger
+
+LOGGER = None
 
 # Assigning loggers
 

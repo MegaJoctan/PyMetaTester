@@ -6,10 +6,10 @@ from strategytester import *
 
 class TradeValidators:
     def __init__(self, 
-                 symbol_info: namedtuple, 
-                 ticks_info: any, 
-                 logger: any,
-                 mt5_instance: mt5=mt5):
+                symbol_info: namedtuple, 
+                ticks_info: any, 
+                logger: any,
+                mt5_instance: mt5=mt5):
         
         self.symbol_info = symbol_info
         self.ticks_info = ticks_info
