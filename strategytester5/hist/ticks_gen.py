@@ -1,7 +1,7 @@
 import numpy as np
 import polars as pl
 import os
-from strategytester import *
+from strategytester5 import *
 class TicksGen:
     def __init__(self):
         pass

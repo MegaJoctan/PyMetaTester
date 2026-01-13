@@ -1,6 +1,6 @@
 import MetaTrader5 as mt5
 from datetime import datetime, timezone
-from strategytester import *
+from strategytester5 import *
 
 class CTrade:
     

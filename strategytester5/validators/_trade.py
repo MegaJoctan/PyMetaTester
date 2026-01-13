@@ -2,7 +2,7 @@ from collections import namedtuple
 import MetaTrader5 as mt5
 from typing import Dict
 from datetime import datetime
-from strategytester import *
+from strategytester5 import *
 
 class TradeValidators:
     def __init__(self, 

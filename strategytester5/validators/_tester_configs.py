@@ -1,6 +1,6 @@
     
 from typing import Dict
-from strategytester import *
+from strategytester5 import *
 
 
 class TesterConfigValidators:

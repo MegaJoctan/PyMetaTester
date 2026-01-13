@@ -1,4 +1,4 @@
-from strategytester import *
+from strategytester5 import *
 # from strategytester import Tick, TradeOrder, TradePosition, TradeDeal, AccountInfo
 
 import MetaTrader5 as mt5
@@ -12,13 +12,13 @@ import fnmatch
 from typing import Optional, Tuple
 from collections import namedtuple
 import polars as pl
-from strategytester.validators._trade import TradeValidators
-from strategytester.validators._tester_configs import TesterConfigValidators
-from strategytester._template import html_report_template
+from strategytester5.validators._trade import TradeValidators
+from strategytester5.validators._tester_configs import TesterConfigValidators
+from strategytester5._template import html_report_template
 import sys
 
-from strategytester.hist import ticks, bars
-from strategytester.hist.ticks_gen import TicksGen
+from strategytester5.hist import ticks, bars
+from strategytester5.hist.ticks_gen import TicksGen
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt

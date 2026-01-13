@@ -2,7 +2,7 @@ import MetaTrader5 as mt5
 from datetime import datetime, timezone, timedelta
 import os
 import polars as pl
-from strategytester import *
+from strategytester5 import *
 
 def ticks_to_polars(ticks):
     return pl.DataFrame({
