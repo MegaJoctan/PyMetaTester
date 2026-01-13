@@ -98,6 +98,9 @@ def on_tick():
 tester.OnTick(ontick_func=on_tick) # very important!
 ```
 
+https://github.com/user-attachments/assets/09ed6921-8f00-4b49-8bcf-c6ac6ae9cdb3
+
+
 ## More information about the project
 
 - [https://www.mql5.com/en/articles/18971](https://www.mql5.com/en/articles/18971)
