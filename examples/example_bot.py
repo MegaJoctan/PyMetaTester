@@ -3,14 +3,18 @@ from strategytester.tester import StrategyTester
 from strategytester.trade_classes.Trade import CTrade
 import json
 import os
+import sys
 
 if not mt5.initialize(): # Initialize MetaTrader5 instance
     print(f"Failed to Initialize MetaTrader5. Error = {mt5.last_error()}")
     mt5.shutdown()
     quit()
     
+# Get path to the folder where this script lives
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 try:
-    with open('tester.json', 'r', encoding='utf-8') as file: # reading a JSON file
+    with open(os.path.join(BASE_DIR, "tester.json"), 'r', encoding='utf-8') as file: # reading a JSON file
         # Deserialize the file data into a Python object
         tester_configs = json.load(file)
 except Exception as e:
