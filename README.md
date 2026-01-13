@@ -1,5 +1,3 @@
-<img width="1024" height="226" alt="1bba69da-cb6c-44ec-bea7-3b5d33981cd3" src="https://github.com/user-attachments/assets/f6b385db-f057-4042-9120-4b92352ce10e" />
-
 ### StrategyTester5
 
 StrategyTester is a Python-based backtesting and strategy testing framework built specifically for the MetaTrader5 (MT5) Python API.
