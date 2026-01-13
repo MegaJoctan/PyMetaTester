@@ -1,15 +1,16 @@
 <img width="1024" height="226" alt="1bba69da-cb6c-44ec-bea7-3b5d33981cd3" src="https://github.com/user-attachments/assets/f6b385db-f057-4042-9120-4b92352ce10e" />
 
-### About the Project
+### StrategyTester5
 
-A Python module for testing trading robots made using [https://www.mql5.com/en/docs/python_metatrader5](metatrader5) in Python.
+StrategyTester is a Python-based backtesting and strategy testing framework built specifically for the MetaTrader5 (MT5) Python API.
+
 
 ### Getting started
 
 Ensure you have the MetaTrader 5 desktop application then proceeed to install the dependencies used in this project in your Python virtual environment
 
 ```bash
-pip install -r requirements.txt
+pip install strategytester5
 ```
 
 ### Running your First Robot in The Strategy Tester
@@ -18,8 +19,8 @@ pip install -r requirements.txt
 
 ```python
 import MetaTrader5 as mt5
-from tester import Tester
-from Trade.Trade import CTrade
+from strategytester5.tester import StrategyTester
+from strategytester5.trade_classes.Trade import CTrade
 import json
 import os
 import config
@@ -29,6 +30,8 @@ if not mt5.initialize(): # Initialize MetaTrader5 instance
     mt5.shutdown()
     quit()
 ```
+
+See examples the examples [https://github.com/MegaJoctan/StrategyTester5/tree/main/examples](https://github.com/MegaJoctan/StrategyTester5/tree/main/examples)
 
 **Step 2: Load configurations from a JSON file. *In this case configs/tester.json file*.**
 
@@ -44,7 +47,7 @@ except Exception as e:
 **Step 3: Initialize the Tester class, giving it configurations and an initialized MetaTrader 5 instance.**
 
 ```python
-tester = Tester(tester_config=tester_configs["tester"], mt5_instance=mt5) # very important
+tester = StrategyTester(tester_config=tester_configs["tester"], mt5_instance=mt5) # very important
 ```
 
 **Optionally, instantiate the CTrade class to make life much easier.**
