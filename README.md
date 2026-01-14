@@ -34,8 +34,11 @@ See examples the examples [https://github.com/MegaJoctan/StrategyTester5/tree/ma
 **Step 2: Load configurations from a JSON file. *In this case configs/tester.json file*.**
 
 ```python
+# Get path to the folder where this script lives
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 try:
-    with open(os.path.join(config.CONFIGS_DIR,'tester.json'), 'r', encoding='utf-8') as file: # reading a JSON file
+    with open(os.path.join(BASE_DIR, "tester.json"), 'r', encoding='utf-8') as file: # reading a JSON file
         # Deserialize the file data into a Python object
         tester_configs = json.load(file)
 except Exception as e:
